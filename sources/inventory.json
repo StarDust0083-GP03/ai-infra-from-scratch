@@ -1,0 +1,58 @@
+{
+  "k8s-device-plugin": {
+    "url": "https://github.com/NVIDIA/k8s-device-plugin.git",
+    "commit": "3dd82d32e62c4b956a85ed765edb0a7b86d83737",
+    "date": "2026-09-22",
+    "files": 11531,
+    "code_files": 10164,
+    "code_lines": 3797258
+  },
+  "kuberay": {
+    "url": "https://github.com/ray-project/kuberay.git",
+    "commit": "e76908b64fc372668ee6be4632415d460d7b5f8b",
+    "date": "2026-09-21",
+    "files": 1175,
+    "code_files": 573,
+    "code_lines": 160251
+  },
+  "megatron-lm": {
+    "url": "https://github.com/NVIDIA/Megatron-LM.git",
+    "commit": "c343bb6d337eae14e195835262854361680bcab8",
+    "date": "2026-09-22",
+    "files": 3369,
+    "code_files": 1539,
+    "code_lines": 607417
+  },
+  "nccl": {
+    "url": "https://github.com/NVIDIA/nccl.git",
+    "commit": "12df1a11afad322be5a204a2db890161cbf8131d",
+    "date": "2026-09-17",
+    "files": 1453,
+    "code_files": 991,
+    "code_lines": 349540
+  },
+  "torchtitan": {
+    "url": "https://github.com/pytorch/torchtitan.git",
+    "commit": "7349a2282d9e30ab718fcde51ee36654a225ff53",
+    "date": "2026-09-22",
+    "files": 815,
+    "code_files": 611,
+    "code_lines": 194225
+  },
+  "vllm": {
+    "url": "https://github.com/vllm-project/vllm.git",
+    "commit": "ca831d1c55714aa10acd826389674ce8f6a4f872",
+    "date": "2026-09-22",
+    "files": 7306,
+    "code_files": 5434,
+    "code_lines": 1964369
+  },
+  "volcano": {
+    "url": "https://github.com/volcano-sh/volcano.git",
+    "commit": "d1fe35ed58fc4d6f43c854523ad603777a7ac941",
+    "date": "2026-09-22",
+    "files": 1973,
+    "code_files": 1203,
+    "code_lines": 270253
+  }
+}

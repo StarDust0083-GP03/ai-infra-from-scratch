@@ -1,0 +1,84 @@
+<!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>读前说明：不懂 CUDA 也能开始 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 00</div><div class="rail-title">读前说明：不懂 CUDA 也能开始</div><ol><li><a href="#你不需要先会什么">你不需要先会什么</a></li><li><a href="#沿字节和等待连续读下去">沿字节和等待连续读下去</a></li><li><a href="#本书怎么验证">本书怎么验证</a></li><li><a href="#三条阅读路线">三条阅读路线</a></li><li><a href="#图怎么看">图怎么看</a></li><li><a href="#示例的边界">示例的边界</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 00 章</div><h1>读前说明：不懂 CUDA 也能开始</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>AI Infra 看起来像一堵缩写墙：GPU、HBM、CUDA、NCCL、TP、FSDP、KV Cache、MIG、RDMA、SLO。它们并不是二十个互不相干的知识点，而是同一条链上不同位置的问题。</p>
+<p>这本书从两个普通问题开始：</p>
+<ol>
+<li>一个用户发出提示词后，数据经过哪些系统才变成下一个 token？</li>
+<li>一次训练 step 中，哪些字节留在显存，哪些字节在 GPU 之间移动？</li>
+</ol>
+<p>能回答这两个问题，就已经有了 AI Infra 的骨架。</p>
+<h2 id="你不需要先会什么">你不需要先会什么<a class="anchor" href="#你不需要先会什么" aria-label="链接到本节">#</a></h2>
+<p>不要求会写 CUDA kernel，不要求有多卡机器，也不要求先学完整 Kubernetes。书中只在真正需要时引入概念：</p>
+<ul>
+<li>解释显存时，再讲 tensor 形状和数据类型；</li>
+<li>解释推理吞吐时，再讲 prefill、decode 与 KV cache；</li>
+<li>解释多卡时，再讲 collective 和网络拓扑；</li>
+<li>解释集群时，再讲 Device Plugin、scheduler 和 operator。</li>
+</ul>
+<p>每章都先回答“它解决什么问题”，再看公式和源码。</p>
+<h2 id="沿字节和等待连续读下去">沿字节和等待连续读下去<a class="anchor" href="#沿字节和等待连续读下去" aria-label="链接到本节">#</a></h2>
+<p>正文反复回到一件事：一个请求当前走到哪一步，为它保存了哪些 tensor，下一步在等谁。显存公式先告诉你装不装得下，Prefill 与 Decode 告诉你计算怎样发生，调度再解释许多请求如何分享有限容量。多卡把等待扩展到 rank，集群把它扩展到作业与副本。</p>
+<p>手算例子只使用明确的形状、精度和假设条件。看到数字时，把输入条件一起带走，不把另一个模型的 KV 大小或另一张卡的峰值当作自己的部署结论。失败情景则用于区分症状与原因：同样是慢、OOM 或超时，发生阶段不同，应该测的对象也不同。</p>
+<h2 id="本书怎么验证">本书怎么验证<a class="anchor" href="#本书怎么验证" aria-label="链接到本节">#</a></h2>
+<p>项目下载了七个官方仓库的浅克隆：</p>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>仓库</th>
+<th>本书用来理解什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>vLLM</td>
+<td>在线推理、调度、KV cache、GPU worker</td>
+</tr>
+<tr>
+<td>TorchTitan</td>
+<td>现代 PyTorch 大模型训练栈</td>
+</tr>
+<tr>
+<td>Megatron-LM</td>
+<td>多维并行与高性能训练</td>
+</tr>
+<tr>
+<td>NCCL</td>
+<td>GPU collective 与通信拓扑</td>
+</tr>
+<tr>
+<td>NVIDIA Device Plugin</td>
+<td>Kubernetes 如何发现和分配 GPU</td>
+</tr>
+<tr>
+<td>Volcano</td>
+<td>队列、PodGroup 与 gang scheduling</td>
+</tr>
+<tr>
+<td>KubeRay</td>
+<td>分布式作业和服务的 operator 模式</td>
+</tr>
+</tbody></table></div>
+<p>同时归档官方文档与 PagedAttention、Megatron-LM、ZeRO、FlashAttention、Roofline 等论文。来源不是为了堆链接，而是用来核对机制和边界。</p>
+<h2 id="三条阅读路线">三条阅读路线<a class="anchor" href="#三条阅读路线" aria-label="链接到本节">#</a></h2>
+<h3 id="第一次接触-ai-infra">第一次接触 AI Infra<a class="anchor" href="#第一次接触-ai-infra" aria-label="链接到本节">#</a></h3>
+<p>按顺序读。第 1 至 8 章建立单卡推理直觉，第 9 至 13 章进入多卡训练，第 14 章之后再看集群。</p>
+<h3 id="只想部署推理服务">只想部署推理服务<a class="anchor" href="#只想部署推理服务" aria-label="链接到本节">#</a></h3>
+<p>读第 1、3 至 10、14、16 至 19 章。训练章节仍建议看第 10 章 collective，因为张量并行也依赖通信。</p>
+<h3 id="正在做训练平台">正在做训练平台<a class="anchor" href="#正在做训练平台" aria-label="链接到本节">#</a></h3>
+<p>读第 2 至 4、9 至 15、17 至 19 章。重点关注训练状态、拓扑、checkpoint 和 gang scheduling。</p>
+<h2 id="图怎么看">图怎么看<a class="anchor" href="#图怎么看" aria-label="链接到本节">#</a></h2>
+<p>书中图都是概念图，不按真实物理尺寸绘制。颜色表示职责或数据类型，不表示某个产品。看到箭头时先问：</p>
+<ul>
+<li>箭头上传的是 token、tensor、控制命令还是持久化数据？</li>
+<li>这一步是否同步等待？</li>
+<li>数据量随参数、batch、序列长度还是并发增长？</li>
+</ul>
+<p>这三个问题比记住组件名称更有用。</p>
+<h2 id="示例的边界">示例的边界<a class="anchor" href="#示例的边界" aria-label="链接到本节">#</a></h2>
+<p><code>examples/infra_lab.py</code> 只用 Python 标准库，提供显存计算和连续批处理玩具模拟。它能验证公式和调度直觉，不能模拟真实 kernel、PCIe、NVLink 或模型质量。</p>
+<pre><code class="language-bash">python3 examples/infra_lab.py memory
+python3 examples/infra_lab.py simulate
+</code></pre>
+<p>书中数字采用二进制 GiB，<code>1 GiB = 1024³ bytes</code>。硬件厂商标称容量有时使用十进制 GB，比较时要先统一单位。</p>
+<blockquote>
+<p>目标不是让你背下整个栈，而是看到指标变化时知道数据在哪里、谁在等待、下一步该测什么。</p>
+</blockquote>
+</div><nav class="chapter-nav" aria-label="章节导航"><a class="next" href="01-request-journey.html"><small>下一章</small><strong>一条请求穿过哪些系统</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>

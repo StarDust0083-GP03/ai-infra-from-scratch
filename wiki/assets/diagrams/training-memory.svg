@@ -1,0 +1,6 @@
+<svg viewBox="0 0 900 430" role="img" aria-label="数据并行与完全分片并行的训练状态分布">
+<text x="40" y="38" class="eyebrow">REPLICATE OR SHARD</text>
+<text x="40" y="88" class="label">普通数据并行</text><g class="gpu"><rect x="230" y="65" width="150" height="105" rx="5"/><rect x="410" y="65" width="150" height="105" rx="5"/><rect x="590" y="65" width="150" height="105" rx="5"/></g><g class="small center"><text x="305" y="100">GPU 0</text><text x="305" y="130">W + G + O</text><text x="485" y="100">GPU 1</text><text x="485" y="130">W + G + O</text><text x="665" y="100">GPU 2</text><text x="665" y="130">W + G + O</text></g>
+<text x="40" y="248" class="label">FSDP / ZeRO-3</text><g class="gpu shard"><rect x="230" y="225" width="150" height="105" rx="5"/><rect x="410" y="225" width="150" height="105" rx="5"/><rect x="590" y="225" width="150" height="105" rx="5"/></g><g class="small center"><text x="305" y="260">GPU 0</text><text x="305" y="290">⅓(W + G + O)</text><text x="485" y="260">GPU 1</text><text x="485" y="290">⅓(W + G + O)</text><text x="665" y="260">GPU 2</text><text x="665" y="290">⅓(W + G + O)</text></g>
+<text x="450" y="385" text-anchor="middle" class="small">计算前后按需 AllGather / ReduceScatter，省显存但增加通信。</text>
+</svg>

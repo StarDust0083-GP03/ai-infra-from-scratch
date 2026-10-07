@@ -1,0 +1,7 @@
+<svg viewBox="0 0 900 420" role="img" aria-label="控制器调和与数据平面恢复循环">
+<text x="40" y="38" class="eyebrow">FAILURE IS A STATE TRANSITION</text>
+<g class="box"><rect x="70" y="90" width="170" height="75" rx="4"/><rect x="365" y="60" width="170" height="75" rx="4"/><rect x="660" y="90" width="170" height="75" rx="4"/><rect x="365" y="255" width="170" height="75" rx="4"/></g>
+<g class="label center"><text x="155" y="122">期望状态</text><text x="450" y="92">观察实际状态</text><text x="745" y="122">发现偏差</text><text x="450" y="287">执行修复</text></g><g class="small center"><text x="155" y="146">replicas = 3</text><text x="450" y="116">只有 2 个健康</text><text x="745" y="146">Pod / GPU / rank 故障</text><text x="450" y="311">重建 · 恢复 · 重试</text></g>
+<path d="M240 126C290 70 320 82 365 94" class="flow"/><path d="M535 94C590 82 620 70 660 126" class="flow"/><path d="M745 165C745 245 610 285 535 292" class="flow"/><path d="M365 292C265 285 155 245 155 165" class="flow"/>
+<text x="450" y="385" text-anchor="middle" class="small">重试前先判断副作用、checkpoint 一致性和故障域。</text>
+</svg>

@@ -1,0 +1,6 @@
+<svg viewBox="0 0 900 470" role="img" aria-label="在线推理服务的控制面与数据面">
+<text x="40" y="38" class="eyebrow">ONLINE INFERENCE CLUSTER</text>
+<text x="40" y="82" class="label accent">数据面</text><g class="box"><rect x="40" y="105" width="145" height="76" rx="4"/><rect x="230" y="105" width="145" height="76" rx="4"/><rect x="430" y="88" width="155" height="62" rx="4"/><rect x="430" y="162" width="155" height="62" rx="4"/><rect x="650" y="88" width="210" height="62" rx="4"/><rect x="650" y="162" width="210" height="62" rx="4"/></g>
+<g class="label center"><text x="112" y="138">Client</text><text x="302" y="138">Gateway</text><text x="507" y="126">Replica A</text><text x="507" y="200">Replica B</text><text x="755" y="126">GPU worker group A</text><text x="755" y="200">GPU worker group B</text></g><g class="flow"><path d="M185 143H230"/><path d="M375 143L430 119"/><path d="M375 143L430 193"/><path d="M585 119H650"/><path d="M585 193H650"/></g>
+<text x="40" y="292" class="label accent">控制面</text><g class="box soft"><rect x="40" y="315" width="820" height="92" rx="4"/></g><g class="small center"><text x="175" y="352">Deployment / Operator</text><text x="450" y="352">Autoscaler</text><text x="720" y="352">Metrics / Rollout</text><text x="175" y="378">期望副本与版本</text><text x="450" y="378">队列 + SLO + GPU 容量</text><text x="720" y="378">健康、延迟、成本</text></g>
+</svg>

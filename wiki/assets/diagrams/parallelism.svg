@@ -1,0 +1,7 @@
+<svg viewBox="0 0 900 470" role="img" aria-label="数据、张量、流水线、上下文和专家并行的切分方向">
+<text x="40" y="38" class="eyebrow">FIVE DIRECTIONS TO SPLIT WORK</text>
+<g class="box"><rect x="40" y="72" width="250" height="100" rx="4"/><rect x="325" y="72" width="250" height="100" rx="4"/><rect x="610" y="72" width="250" height="100" rx="4"/><rect x="182" y="220" width="250" height="100" rx="4"/><rect x="467" y="220" width="250" height="100" rx="4"/></g>
+<g class="label center"><text x="165" y="105">DP · 数据并行</text><text x="450" y="105">TP · 张量并行</text><text x="735" y="105">PP · 流水线并行</text><text x="307" y="253">CP · 上下文并行</text><text x="592" y="253">EP · 专家并行</text></g>
+<g class="small center"><text x="165" y="136">复制模型，切 batch</text><text x="450" y="136">切一层里的矩阵</text><text x="735" y="136">切不同层</text><text x="307" y="284">切长序列</text><text x="592" y="284">切 MoE experts</text></g>
+<g class="box soft"><rect x="40" y="370" width="820" height="58" rx="4"/></g><text x="450" y="405" text-anchor="middle" class="label">显存省在哪里，通信就会出现在哪里。</text>
+</svg>

@@ -1,0 +1,91 @@
+<!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>可观测性、SLO 与成本 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 17</div><div class="rail-title">可观测性、SLO 与成本</div><ol><li><a href="#用户层指标">用户层指标</a></li><li><a href="#引擎层指标">引擎层指标</a></li><li><a href="#gpu-与系统指标">GPU 与系统指标</a></li><li><a href="#little-39-s-law">Little&amp;#39;s Law</a></li><li><a href="#slo-不能只有一个数字">SLO 不能只有一个数字</a></li><li><a href="#成本指标">成本指标</a></li><li><a href="#cardinality-警告">Cardinality 警告</a></li><li><a href="#一张最小-dashboard">一张最小 Dashboard</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 17 章</div><h1>可观测性、SLO 与成本</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>可观测性的目标不是把每个 exporter 指标搬进 Dashboard，而是能从用户问题一路定位到队列、引擎、GPU、网络或存储。</p>
+<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 390" role="img" aria-label="推理请求延迟瀑布图">
+<text x="40" y="38" class="eyebrow">LATENCY WATERFALL</text>
+<g class="timeline"><rect x="70" y="90" width="90" height="62" class="seg four"/><rect x="160" y="90" width="160" height="62" class="seg two"/><rect x="320" y="90" width="120" height="62" class="seg three"/><rect x="440" y="90" width="310" height="62" class="seg one"/><rect x="750" y="90" width="90" height="62" class="seg five"/></g>
+<g class="small center"><text x="115" y="124">网关</text><text x="240" y="124">排队</text><text x="380" y="124">Prefill</text><text x="595" y="124">Decode</text><text x="795" y="124">回传</text></g>
+<path d="M70 205H440" class="measure"/><text x="255" y="230" text-anchor="middle" class="label">TTFT</text><path d="M440 275H750" class="measure"/><text x="595" y="300" text-anchor="middle" class="label">生成阶段：TPOT / ITL</text><path d="M70 345H840" class="measure"/><text x="455" y="372" text-anchor="middle" class="small">E2E latency</text>
+</svg><figcaption>图：端到端延迟必须拆成等待、Prefill 与 Decode。</figcaption></figure>
+
+<h2 id="用户层指标">用户层指标<a class="anchor" href="#用户层指标" aria-label="链接到本节">#</a></h2>
+<h3 id="ttft">TTFT<a class="anchor" href="#ttft" aria-label="链接到本节">#</a></h3>
+<p>首 token 延迟，受网关、排队、tokenize 和 prefill 共同影响。交互式应用通常对它最敏感。</p>
+<h3 id="tpot-itl">TPOT / ITL<a class="anchor" href="#tpot-itl" aria-label="链接到本节">#</a></h3>
+<p>生成阶段每 token 时间或 token 间隔。看 p50、p95、p99 和时间序列，避免平均值掩盖卡顿。</p>
+<h3 id="e2e-latency">E2E latency<a class="anchor" href="#e2e-latency" aria-label="链接到本节">#</a></h3>
+<p>从请求开始到完成。它强烈受输出长度影响，应按输入输出 token 分桶。</p>
+<h3 id="成功率与取消率">成功率与取消率<a class="anchor" href="#成功率与取消率" aria-label="链接到本节">#</a></h3>
+<p>区分限流、队列超时、客户端取消、引擎错误、OOM 和内容策略拒绝。把所有非 200 合并会失去行动方向。</p>
+<h2 id="引擎层指标">引擎层指标<a class="anchor" href="#引擎层指标" aria-label="链接到本节">#</a></h2>
+<ul>
+<li>waiting/running/preempted requests；</li>
+<li>input/output tokens/s；</li>
+<li>KV cache utilization 与 block 分配失败；</li>
+<li>prefix cache hit；</li>
+<li>iteration time；</li>
+<li>prefill/decode token 数；</li>
+<li>scheduler time、model execution time、sampling time。</li>
+</ul>
+<p>当 TTFT 上升时，先看 queue time 还是 prefill time。若 queue 上升但 GPU tokens/s 没变，容量已饱和；若 GPU 有大量空隙，瓶颈可能在 CPU 或通信。</p>
+<h3 id="同样-ttft-上升-可能需要完全不同的行动">同样 TTFT 上升，可能需要完全不同的行动<a class="anchor" href="#同样-ttft-上升-可能需要完全不同的行动" aria-label="链接到本节">#</a></h3>
+<p>队列时间升高、引擎吞吐稳定，可能已到容量上限，需扩容或限制输入；prefill 时间随长文变大，可能需要分桶或调 chunk；GPU 有空隙而 tokenizer 繁忙，则要修 CPU 路径。总延迟只显示症状，分段指标才提供行动依据。</p>
+<p>ITL 也要按请求观察。系统平均输出速率很好，一部分长请求仍可能频繁被抢占，用户感到停顿。吞吐指标与体验指标分别保留，不用总体平均值替代所有租户的尾延迟。</p>
+<h2 id="gpu-与系统指标">GPU 与系统指标<a class="anchor" href="#gpu-与系统指标" aria-label="链接到本节">#</a></h2>
+<ul>
+<li>SM、tensor core、HBM 带宽；</li>
+<li>显存 allocated/reserved；</li>
+<li>NVLink/PCIe/NIC 流量和错误；</li>
+<li>功耗、温度、频率、ECC/Xid；</li>
+<li>CPU、NUMA、pinned memory；</li>
+<li>磁盘与对象存储吞吐；</li>
+<li>Pod restart 和节点压力。</li>
+</ul>
+<p>指标要与 run/request trace 关联，否则只能看到“卡忙”，不知道服务了哪种请求。</p>
+<h2 id="little-39-s-law">Little&#39;s Law<a class="anchor" href="#little-39-s-law" aria-label="链接到本节">#</a></h2>
+<p>稳定系统中：</p>
+<pre><code class="language-text">L = λ × W
+</code></pre>
+<ul>
+<li><code>L</code>：系统内平均请求数；</li>
+<li><code>λ</code>：平均到达率；</li>
+<li><code>W</code>：平均停留时间。</li>
+</ul>
+<p>它帮助做量级检查：每秒到达 10 请求，平均停留 2 秒，系统内约有 20 个请求。若实际队列持续增长，输入率已超过完成率，扩容、限流或降级必须发生。</p>
+<h3 id="little-39-s-law-的时间范围要对应同一个系统">Little&#39;s Law 的时间范围要对应同一个系统<a class="anchor" href="#little-39-s-law-的时间范围要对应同一个系统" aria-label="链接到本节">#</a></h3>
+<p>若 L 统计引擎内活跃与等待请求，W 也应统计进入引擎到离开的时间，而不能拿完整网络耗时代入。到达率和平均值也需来自相近稳定窗口；队列持续增长时，不能用短时数据假装系统已有稳定工作点。</p>
+<p>它适合量级核对，不自动给出所需 GPU 数。知道平均同时有二十条请求，还要了解它们的长度、prefill 与 decode 组成以及每副本可服务能力。</p>
+<h2 id="slo-不能只有一个数字">SLO 不能只有一个数字<a class="anchor" href="#slo-不能只有一个数字" aria-label="链接到本节">#</a></h2>
+<p>一个可操作的 SLO 示例：</p>
+<ul>
+<li>对 prompt 低于 2K、输出低于 512 的交互请求；</li>
+<li>月度 99.9% 成功；</li>
+<li>p95 TTFT 小于 1.5 秒；</li>
+<li>p95 TPOT 小于 60 ms；</li>
+<li>排除用户主动取消，但不排除服务端过载拒绝。</li>
+</ul>
+<p>先定义流量类别和测量窗口，再谈目标。超长上下文应有独立 SLO 或异步产品形态。</p>
+<h2 id="成本指标">成本指标<a class="anchor" href="#成本指标" aria-label="链接到本节">#</a></h2>
+<p>只看每 GPU 小时价格无法比较系统。更有用：</p>
+<pre><code class="language-text">cost per 1M input tokens
+cost per 1M output tokens
+cost per successful request class
+</code></pre>
+<p>还要计入闲置、冷启动、重复计算、模型下载、存储和跨区流量。低利用率副本可能是为了低 TTFT 保留的必要容量，不应简单视为浪费。</p>
+<h3 id="成本分母也应该代表有用结果">成本分母也应该代表有用结果<a class="anchor" href="#成本分母也应该代表有用结果" aria-label="链接到本节">#</a></h3>
+<p>过载重试与抢占重算都消耗 GPU，却没有增加同等数量的成功请求。只按总处理 token 计算成本，可能把重复工作当高效率。可以同时统计计费量、有效输出和成功请求类别，解释成本变化来自量化、利用率还是失败减少。</p>
+<p>低流量保留预热副本会提高每 token 成本，却可能是低 TTFT 的必要代价。比较政策时固定 SLO 与流量，而不是让较慢系统凭关闭全部备用容量获得便宜结论。</p>
+<h2 id="cardinality-警告">Cardinality 警告<a class="anchor" href="#cardinality-警告" aria-label="链接到本节">#</a></h2>
+<p>不要把 request ID、完整 prompt、用户 ID 或任意模型参数放进 metrics label。高基数会拖垮监控系统，也可能泄露敏感数据。细粒度信息进入受控 trace/log，指标保留有限维度。</p>
+<h2 id="一张最小-dashboard">一张最小 Dashboard<a class="anchor" href="#一张最小-dashboard" aria-label="链接到本节">#</a></h2>
+<ol>
+<li>到达率、完成率、拒绝率；</li>
+<li>TTFT/TPOT/E2E 分位数；</li>
+<li>waiting/running 与 KV 使用；</li>
+<li>input/output tokens/s；</li>
+<li>GPU compute/memory/bandwidth；</li>
+<li>错误按阶段分类；</li>
+<li>副本数、冷启动和版本；</li>
+<li>每百万 token 成本。</li>
+</ol>
+<p>先保证每个图能回答一个运维问题，再增加面板。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="16-serving-cluster.html"><small>上一章</small><strong>在线服务：网关、队列、副本与扩缩容</strong></a><a class="next" href="18-failure-recovery.html"><small>下一章</small><strong>故障恢复：把失败当作正常路径</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>

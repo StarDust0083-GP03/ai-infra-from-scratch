@@ -1,0 +1,68 @@
+<!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>训练循环与训练显存 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 11</div><div class="rail-title">训练循环与训练显存</div><ol><li><a href="#forward">Forward</a></li><li><a href="#backward">Backward</a></li><li><a href="#optimizer-step">Optimizer Step</a></li><li><a href="#micro-batch-global-batch-与累积">Micro-batch、Global batch 与累积</a></li><li><a href="#训练显存四大项">训练显存四大项</a></li><li><a href="#activation-checkpointing">Activation Checkpointing</a></li><li><a href="#mixed-precision">Mixed Precision</a></li><li><a href="#torchtitan-的训练骨架">TorchTitan 的训练骨架</a></li><li><a href="#训练吞吐看什么">训练吞吐看什么</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 11 章</div><h1>训练循环与训练显存</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>训练基础循环只有四步：取数据、forward、backward、optimizer step。大模型训练系统的复杂性来自每一步都可能跨多卡，并且状态大到不能完整复制。</p>
+<pre><code class="language-python">for batch in dataloader:
+    optimizer.zero_grad()
+    loss = model(batch)
+    loss.backward()
+    optimizer.step()
+</code></pre>
+<h2 id="forward">Forward<a class="anchor" href="#forward" aria-label="链接到本节">#</a></h2>
+<p>输入 token 经过 embedding 和每层 Transformer，得到 logits 与 loss。为 backward 计算梯度，框架通常保留部分中间激活。</p>
+<h2 id="backward">Backward<a class="anchor" href="#backward" aria-label="链接到本节">#</a></h2>
+<p>自动微分按计算图反向计算参数梯度。Backward 不是 forward 的简单倒放，它可能需要读取保存激活、重算 checkpointed 区域，并在数据并行 rank 间同步梯度。</p>
+<h2 id="optimizer-step">Optimizer Step<a class="anchor" href="#optimizer-step" aria-label="链接到本节">#</a></h2>
+<p>AdamW 读取权重、梯度和两个 moment，更新参数。优化器状态体积大，且是训练 checkpoint 的主要组成部分之一。</p>
+<h2 id="micro-batch-global-batch-与累积">Micro-batch、Global batch 与累积<a class="anchor" href="#micro-batch-global-batch-与累积" aria-label="链接到本节">#</a></h2>
+<pre><code class="language-text">global batch
+= micro batch per GPU × data parallel degree × accumulation steps
+</code></pre>
+<p>梯度累积让每卡用较小 micro-batch 多跑几次 forward/backward，再做 optimizer step。它降低单次激活峰值，但增加每个 step 的串行 micro-step 数。</p>
+<p>必须记录 batch 的口径，否则学习率和吞吐都无法比较。</p>
+<h3 id="一次-optimizer-step-究竟看过多少样本">一次 optimizer step 究竟看过多少样本<a class="anchor" href="#一次-optimizer-step-究竟看过多少样本" aria-label="链接到本节">#</a></h3>
+<p>每个 DP rank 的 micro-batch 为 2，DP 度为 8，累积 4 次后更新，则 global batch 为 64。TP 或 PP rank 协同处理同一份模型工作，不能再把它们当作额外独立样本乘进去。比较吞吐和学习率时，必须使用相同 batch 口径。</p>
+<p>累积降低单次激活峰值，但梯度要在更新前正确累计，loss 缩放与同步策略也要匹配。不能简单重复四次普通循环而每次都清梯度并 step，那会成为四次不同的优化器更新。</p>
+<h2 id="训练显存四大项">训练显存四大项<a class="anchor" href="#训练显存四大项" aria-label="链接到本节">#</a></h2>
+<ol>
+<li>模型参数；</li>
+<li>梯度；</li>
+<li>优化器状态；</li>
+<li>激活。</li>
+</ol>
+<p>前 3 项主要随参数量增长，激活主要随 micro-batch、序列长度、层和实现增长。FSDP/ZeRO 主要分片前 3 项，activation checkpointing 主要减少第 4 项。</p>
+<h2 id="activation-checkpointing">Activation Checkpointing<a class="anchor" href="#activation-checkpointing" aria-label="链接到本节">#</a></h2>
+<p>普通做法保存中间激活，用空间换 backward 速度。Checkpointing 只保存选定边界，backward 时重新 forward 该段。</p>
+<pre><code class="language-text">少存激活 -&gt; 显存下降
+重新计算 -&gt; step 时间上升
+</code></pre>
+<p>选择粒度太粗，重算多；太细，边界和调度开销增加。应按层或算子成本 profile。</p>
+<h3 id="重计算省下的是激活-而不是所有训练状态">重计算省下的是激活，而不是所有训练状态<a class="anchor" href="#重计算省下的是激活-而不是所有训练状态" aria-label="链接到本节">#</a></h3>
+<p>forward 保存每层中间结果方便 backward，但占显存；checkpointing 只留边界，反向需要时重新算该段。参数、梯度与 optimizer moments 仍存在，所以状态主导的 OOM 不会只靠重算消失。</p>
+<p>选择区域时看保存字节与重算成本。很便宜又很占空间的中间结果适合重算，昂贵区域则可能拖慢 step。随机操作与实现细节也需正确处理，数值训练不能只验证程序没报错。</p>
+<h2 id="mixed-precision">Mixed Precision<a class="anchor" href="#mixed-precision" aria-label="链接到本节">#</a></h2>
+<p>模型计算可用 BF16/FP16/FP8，部分归约和优化器状态保留更高精度。混合精度的目标不是“所有 tensor 都变小”，而是在数值稳定、硬件吞吐和显存间取平衡。</p>
+<p>FP16 训练常需要 loss scaling 防止小梯度下溢。BF16 指数范围更大，但尾数精度较低。具体策略由模型、硬件和框架决定。</p>
+<h2 id="torchtitan-的训练骨架">TorchTitan 的训练骨架<a class="anchor" href="#torchtitan-的训练骨架" aria-label="链接到本节">#</a></h2>
+<p>当前源码把职责拆为：</p>
+<ul>
+<li><code>train.py</code> / training engine：驱动 step；</li>
+<li><code>components/data</code>：数据源与 dataloader；</li>
+<li><code>components/optimizer</code>：优化器与 scheduler；</li>
+<li><code>distributed</code>：并行维度和 mesh；</li>
+<li><code>components/checkpointer</code>：保存恢复；</li>
+<li><code>observability</code>：日志、metrics、profiling。</li>
+</ul>
+<p>阅读时先画每 step 时间线，再进入并行模块。</p>
+<h3 id="step-变快-还要确认每步工作没有变少">step 变快，还要确认每步工作没有变少<a class="anchor" href="#step-变快-还要确认每步工作没有变少" aria-label="链接到本节">#</a></h3>
+<p>缩短序列或减少 global batch 会降低 step 时间，但改变了处理的数据量。tokens/s、有效样本数和 loss 曲线一起比较，才能判断优化是否保留训练语义。混合精度也要观察数值异常，速度提升不应以模型无法收敛为代价。</p>
+<p>GPU 空隙可能来自 dataloader、通信或 checkpoint。将一次 step 拆成取数、前向、反向、更新和保存，再找最长等待段，比先替换某个 kernel 更容易解释结果。</p>
+<h2 id="训练吞吐看什么">训练吞吐看什么<a class="anchor" href="#训练吞吐看什么" aria-label="链接到本节">#</a></h2>
+<ul>
+<li>samples/s 或 tokens/s；</li>
+<li>model FLOPs utilization，但要统一计算口径；</li>
+<li>step time 及 data/forward/backward/optimizer/communication 分解；</li>
+<li>straggler rank；</li>
+<li>checkpoint pause；</li>
+<li>loss 和梯度健康度。</li>
+</ul>
+<p>只追求 GPU 利用率可能把数据错误、数值发散和 checkpoint 失败藏起来。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="10-collectives.html"><small>上一章</small><strong>Collective：GPU 之间怎样交换数据</strong></a><a class="next" href="12-distributed-training.html"><small>下一章</small><strong>分片、重计算与并行组合</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>

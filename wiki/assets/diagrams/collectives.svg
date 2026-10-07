@@ -1,0 +1,7 @@
+<svg viewBox="0 0 900 430" role="img" aria-label="四种常见集体通信的输入输出形状">
+<text x="40" y="38" class="eyebrow">COLLECTIVE COMMUNICATION</text>
+<g class="box"><rect x="40" y="70" width="190" height="128" rx="4"/><rect x="250" y="70" width="190" height="128" rx="4"/><rect x="460" y="70" width="190" height="128" rx="4"/><rect x="670" y="70" width="190" height="128" rx="4"/></g>
+<g class="label center"><text x="135" y="102">AllReduce</text><text x="345" y="102">AllGather</text><text x="555" y="102">ReduceScatter</text><text x="765" y="102">AllToAll</text></g>
+<g class="small center"><text x="135" y="132">每卡输入不同</text><text x="135" y="157">每卡得到同一聚合</text><text x="345" y="132">每卡一个分片</text><text x="345" y="157">每卡得到全部分片</text><text x="555" y="132">先聚合</text><text x="555" y="157">每卡留下一个分片</text><text x="765" y="132">每卡发给所有卡</text><text x="765" y="157">MoE 常见</text></g>
+<path d="M135 225C135 300 765 300 765 225" class="flow"/><path d="M765 315C765 390 135 390 135 315" class="flow"/><text x="450" y="284" text-anchor="middle" class="small">带宽 · 延迟 · 拓扑 · 同步等待</text><text x="450" y="363" text-anchor="middle" class="label accent">collective 不是免费函数调用</text>
+</svg>

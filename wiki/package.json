@@ -1,0 +1,12 @@
+{
+  "name": "ai-infra-from-scratch-book",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "verify": "python3 verify.py"
+  },
+  "dependencies": {
+    "marked": "^14.1.4"
+  }
+}

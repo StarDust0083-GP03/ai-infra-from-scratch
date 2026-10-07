@@ -1,0 +1,9 @@
+<svg viewBox="0 0 900 390" role="img" aria-label="Roofline 模型显示带宽瓶颈和计算瓶颈">
+<text x="40" y="38" class="eyebrow">ROOFLINE MENTAL MODEL</text>
+<g class="axis"><path d="M100 315V70M100 315H840"/></g>
+<text x="45" y="190" transform="rotate(-90 45 190)" class="small">可达到的性能</text><text x="470" y="360" text-anchor="middle" class="small">算术强度：每搬一个字节做多少计算 →</text>
+<path d="M110 305L500 105H825" class="roof"/>
+<line x1="500" y1="315" x2="500" y2="105" class="dashed"/>
+<text x="260" y="195" class="label accent">带宽受限</text><text x="260" y="220" class="small">先减少数据搬运</text><text x="660" y="90" class="label accent">计算受限</text><text x="660" y="130" class="small">再提高 kernel 效率</text>
+<circle cx="245" cy="245" r="8" class="dot"/><text x="260" y="270" class="small">常见 decode</text><circle cx="625" cy="105" r="8" class="dot"/><text x="600" y="155" class="small">大矩阵乘</text>
+</svg>

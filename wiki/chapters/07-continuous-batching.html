@@ -1,0 +1,73 @@
+<!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>连续批处理：GPU 如何同时服务很多人 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 07</div><div class="rail-title">连续批处理：GPU 如何同时服务很多人</div><ol><li><a href="#iteration-level-scheduling">iteration-level scheduling</a></li><li><a href="#三个约束">三个约束</a></li><li><a href="#策略不是只有-fifo">策略不是只有 FIFO</a></li><li><a href="#为什么吞吐和延迟会冲突">为什么吞吐和延迟会冲突</a></li><li><a href="#玩具模拟器">玩具模拟器</a></li><li><a href="#vllm-源码地图">vLLM 源码地图</a></li><li><a href="#benchmark-应记录什么">Benchmark 应记录什么</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 07 章</div><h1>连续批处理：GPU 如何同时服务很多人</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>传统静态 batch 等一组样本全部完成再换下一组。在线生成的请求长短差异很大，如果等待最长请求，短请求完成后的计算槽位会空着。</p>
+<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 420" role="img" aria-label="静态批处理与连续批处理时间线对比">
+<text x="40" y="38" class="eyebrow">BATCH SCHEDULING</text>
+<text x="40" y="90" class="label">静态批</text><g class="timeline"><rect x="150" y="62" width="180" height="45" class="seg one"/><rect x="330" y="62" width="350" height="45" class="seg two"/><rect x="680" y="62" width="120" height="45" class="seg four"/></g><text x="240" y="90" text-anchor="middle" class="small">短请求已完成</text><text x="505" y="90" text-anchor="middle" class="small">等待最长请求</text>
+<text x="40" y="178" class="label">连续批</text><g class="timeline"><rect x="150" y="145" width="120" height="45" class="seg one"/><rect x="270" y="145" width="100" height="45" class="seg three"/><rect x="370" y="145" width="150" height="45" class="seg two"/><rect x="520" y="145" width="90" height="45" class="seg five"/><rect x="610" y="145" width="190" height="45" class="seg one"/></g><g class="small center"><text x="210" y="173">A</text><text x="320" y="173">C 进入</text><text x="445" y="173">B</text><text x="565" y="173">D 进入</text><text x="705" y="173">混合执行</text></g>
+<g class="axis"><path d="M150 230H810"/></g><text x="150" y="255" class="small">iteration 1</text><text x="345" y="255" class="small">iteration 2</text><text x="540" y="255" class="small">iteration 3</text><text x="735" y="255" class="small">time →</text>
+<g class="box soft"><rect x="40" y="305" width="820" height="72" rx="4"/></g><text x="70" y="334" class="label">每轮重新装批</text><text x="70" y="359" class="small">完成的序列立即离开，新请求可进入；token budget 与 KV block 成为调度约束。</text>
+</svg><figcaption>图：连续批处理在迭代边界移出完成请求，并接纳新请求。</figcaption></figure>
+
+<h2 id="iteration-level-scheduling">iteration-level scheduling<a class="anchor" href="#iteration-level-scheduling" aria-label="链接到本节">#</a></h2>
+<p>自回归 decode 天然分轮。推理引擎可以在每轮重新决定 batch：</p>
+<ol>
+<li>找出仍在运行的序列；</li>
+<li>接纳等待请求或 prefill chunk；</li>
+<li>检查 token budget 和 KV block；</li>
+<li>生成本轮模型输入；</li>
+<li>GPU 执行；</li>
+<li>更新序列状态，释放完成请求。</li>
+</ol>
+<p>这就是连续批处理的核心。它不是把 HTTP 请求简单合成一个列表，而是在生成过程中不断重组工作。</p>
+<h2 id="三个约束">三个约束<a class="anchor" href="#三个约束" aria-label="链接到本节">#</a></h2>
+<h3 id="token-budget">Token budget<a class="anchor" href="#token-budget" aria-label="链接到本节">#</a></h3>
+<p>一轮最多处理多少 token。Decode 序列通常各贡献一个新位置，chunked prefill 可能贡献许多位置。</p>
+<h3 id="sequence-数量">Sequence 数量<a class="anchor" href="#sequence-数量" aria-label="链接到本节">#</a></h3>
+<p>活跃序列越多，调度和 metadata 开销越大，也占更多 KV。即使 token budget 还有余量，也可能受最大序列数限制。</p>
+<h3 id="kv-block">KV block<a class="anchor" href="#kv-block" aria-label="链接到本节">#</a></h3>
+<p>新请求只有能分配需要的 block 才能前进。KV 压力会触发等待、抢占、重算或拒绝。</p>
+<h3 id="这一轮有-token-预算-为什么还是进不了新请求">这一轮有 token 预算，为什么还是进不了新请求<a class="anchor" href="#这一轮有-token-预算-为什么还是进不了新请求" aria-label="链接到本节">#</a></h3>
+<p>假设一轮允许 128 个 token，20 条 decode 序列各占一个位置，理论还剩 108。新 prompt 可以切入这部分，但只有 KV 池能提供需要的块、序列数没到上限时才能执行。三个约束限制不同对象，空着一项不代表其他项也有余量。</p>
+<p>下一轮某条请求结束，它的计算位置和可释放 KV 才能给新请求。连续批处理因此需要随结果更新资源，不是把到达的 HTTP 请求一次拼起来后始终保持 batch 不变。</p>
+<h2 id="策略不是只有-fifo">策略不是只有 FIFO<a class="anchor" href="#策略不是只有-fifo" aria-label="链接到本节">#</a></h2>
+<p>引擎可考虑到达顺序、优先级、已完成进度、请求长度和 SLA。不同策略会改变公平性：</p>
+<ul>
+<li>优先短请求可降低平均延迟，长请求可能饥饿；</li>
+<li>优先 decode 可保持流畅，新的长 prompt TTFT 上升；</li>
+<li>优先已运行请求可减少抢占，但高优请求响应不够快。</li>
+</ul>
+<p>产品应定义优先级语义，引擎参数只是实现手段。</p>
+<h2 id="为什么吞吐和延迟会冲突">为什么吞吐和延迟会冲突<a class="anchor" href="#为什么吞吐和延迟会冲突" aria-label="链接到本节">#</a></h2>
+<p>等待更多请求形成大 batch，可提高权重复用和 GPU 效率，但每个请求先在队列里多等。低流量下强行等待 batch 往往得不偿失，高流量下不做 batching 又浪费 GPU。</p>
+<p>服务需要在真实到达率下找工作点，而不是只跑“无限并发”吞吐 benchmark。</p>
+<h3 id="最大吞吐实验为什么不代表真实等待">最大吞吐实验为什么不代表真实等待<a class="anchor" href="#最大吞吐实验为什么不代表真实等待" aria-label="链接到本节">#</a></h3>
+<p>持续灌满请求可以测接近饱和时的 token 吞吐，却无法说明低流量用户等多久。为了攒大 batch 额外等待，在饱和时不明显，在每秒只有少量请求时可能成为主要延迟。</p>
+<p>评测应同时给出到达率、长度分布和延迟分位数。短任务优先降低平均值，却可能让长任务反复被推迟；加优先级后还要检查饥饿与租户公平，不能只盯总体 tokens/s。</p>
+<h2 id="玩具模拟器">玩具模拟器<a class="anchor" href="#玩具模拟器" aria-label="链接到本节">#</a></h2>
+<pre><code class="language-bash">python3 examples/infra_lab.py simulate
+</code></pre>
+<p>模拟器每轮先给可 decode 请求一个 token，再用剩余 token budget 做 chunked prefill，并用固定 block 管理 KV。它故意省略模型执行时间，帮助观察调度顺序。</p>
+<p>试着修改 <code>token_budget</code>：</p>
+<ul>
+<li>预算太小，长 prefill 需要更多轮，TTFT 上升；</li>
+<li>预算变大，prefill 更快，但真实系统中一次 iteration 可能更长；</li>
+<li>block 太少，模拟会没有进展，对应真实系统的 KV 容量压力。</li>
+</ul>
+<h2 id="vllm-源码地图">vLLM 源码地图<a class="anchor" href="#vllm-源码地图" aria-label="链接到本节">#</a></h2>
+<pre><code class="language-text">vllm/v1/core/sched/scheduler.py
+  -&gt; 选择 running / waiting 请求
+  -&gt; 向 KVCacheManager 请求 slot
+  -&gt; 生成 SchedulerOutput
+
+vllm/v1/engine/core.py
+  -&gt; 驱动 schedule -&gt; execute -&gt; update 循环
+
+vllm/v1/worker/gpu_model_runner.py
+  -&gt; 把调度输出变成 GPU 输入并执行模型
+</code></pre>
+<p>源码会随版本变化，但“选择工作、分配缓存、执行、更新”的循环稳定。</p>
+<h3 id="读调度源码时追一条请求的资源变化">读调度源码时追一条请求的资源变化<a class="anchor" href="#读调度源码时追一条请求的资源变化" aria-label="链接到本节">#</a></h3>
+<p>从等待队列选中请求，查看本轮分了多少 token、申请了哪些 block；执行后再看计数推进、完成释放或抢占。调度输出与模型执行结果分开核对，才能发现“选中了但没推进”或“结束了却没释放”。玩具模拟器只演示这种关系，没有真实 kernel 和网络时间，不能据此预测某张 GPU 的性能。</p>
+<h2 id="benchmark-应记录什么">Benchmark 应记录什么<a class="anchor" href="#benchmark-应记录什么" aria-label="链接到本节">#</a></h2>
+<p>至少固定：模型、精度、输入输出长度分布、到达过程、最大并发、token budget、KV 配置、是否 prefix cache、是否流式。只报 requests/s 无法比较不同长度的工作负载，最好同时报告 input/output tokens/s 和延迟分位数。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="06-kv-cache.html"><small>上一章</small><strong>KV Cache：上下文为什么越来越贵</strong></a><a class="next" href="08-loading-quantization.html"><small>下一章</small><strong>模型加载、精度与量化</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>

@@ -1,0 +1,84 @@
+<!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>KV Cache：上下文为什么越来越贵 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 06</div><div class="rail-title">KV Cache：上下文为什么越来越贵</div><ol><li><a href="#先记公式">先记公式</a></li><li><a href="#active-tokens-是什么">Active tokens 是什么</a></li><li><a href="#连续大块为什么浪费">连续大块为什么浪费</a></li><li><a href="#block-大小的权衡">Block 大小的权衡</a></li><li><a href="#手算分页的最后一块">手算分页的最后一块</a></li><li><a href="#prefix-caching">Prefix caching</a></li><li><a href="#抢占与重计算">抢占与重计算</a></li><li><a href="#源码阅读路线">源码阅读路线</a></li><li><a href="#常见误区">常见误区</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 06 章</div><h1>KV Cache：上下文为什么越来越贵</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>注意力层生成新 token 时需要参考之前位置的 key 和 value。重复计算全部历史很浪费，所以推理引擎把每层历史 K/V 保存下来。这就是 KV cache。</p>
+<h2 id="先记公式">先记公式<a class="anchor" href="#先记公式" aria-label="链接到本节">#</a></h2>
+<p>对常见 Transformer，单个 token 的 KV 下界约为：</p>
+<pre><code class="language-text">KV bytes/token
+= 2 × layers × kv_heads × head_dim × bytes_per_element
+</code></pre>
+<p>前面的 2 表示 K 和 V。全部活跃序列：</p>
+<pre><code class="language-text">total KV ≈ bytes/token × active tokens
+</code></pre>
+<p>例：32 层、8 个 KV heads、head dim 128、BF16：</p>
+<pre><code class="language-text">2 × 32 × 8 × 128 × 2 = 131,072 bytes/token
+</code></pre>
+<p>也就是每 token 128 KiB。总共 131,072 个活跃 token 时，理论 KV 正好约 16 GiB。</p>
+<h2 id="active-tokens-是什么">Active tokens 是什么<a class="anchor" href="#active-tokens-是什么" aria-label="链接到本节">#</a></h2>
+<p>它是当前仍在服务中的所有序列已缓存 token 总和，不等于每秒输入 token，也不等于配置的最大上下文。一个完成的请求释放 KV 后，block 可给新请求复用。</p>
+<p>容量规划应关注分布：</p>
+<ul>
+<li>同时活跃多少请求；</li>
+<li>每条请求当时已经走到多长；</li>
+<li>prefix cache 是否共享前缀 block；</li>
+<li>speculative decoding 是否增加临时状态；</li>
+<li>KV 使用什么精度。</li>
+</ul>
+<h3 id="容量统计是一张随时间变化的照片">容量统计是一张随时间变化的照片<a class="anchor" href="#容量统计是一张随时间变化的照片" aria-label="链接到本节">#</a></h3>
+<p>一条请求读完 2000 token、又生成 100 token，缓存覆盖约 2100 个位置；另一条只到 500。即使二者最大上下文都设置 8192，当前有效 KV 不是两个最大值相加。请求完成后释放或进入受管理缓存，后续占用又会变化。</p>
+<p>按本章 128 KiB/token 的例子，一条 8192 token 序列理论约 1 GiB，八条都走到该长度约 8 GiB。这个算例说明为什么上下文和并发要一起看，不能把最大值乘平均并发当成可靠峰值。</p>
+<h2 id="连续大块为什么浪费">连续大块为什么浪费<a class="anchor" href="#连续大块为什么浪费" aria-label="链接到本节">#</a></h2>
+<p>如果为每条请求预留最大上下文的连续区域，短请求会留下大量内部浪费，不同长度释放后还可能形成外部碎片。请求长度不可预测，使传统连续分配很难保持高利用。</p>
+<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 390" role="img" aria-label="连续显存分配与分页 KV block 对比">
+<text x="40" y="38" class="eyebrow">CONTIGUOUS VS PAGED KV CACHE</text>
+<text x="40" y="92" class="label">连续预留</text><g class="memory"><rect x="170" y="64" width="600" height="52" rx="3"/><rect x="170" y="64" width="280" height="52" class="used"/><rect x="450" y="64" width="320" height="52" class="waste"/></g><text x="790" y="96" class="small">预留但未用</text>
+<text x="40" y="185" class="label">Paged blocks</text><g class="pages"><rect x="170" y="157" width="72" height="52"/><rect x="250" y="157" width="72" height="52"/><rect x="330" y="157" width="72" height="52"/><rect x="410" y="157" width="72" height="52"/><rect x="490" y="157" width="72" height="52"/><rect x="570" y="157" width="72" height="52"/><rect x="650" y="157" width="72" height="52"/><rect x="730" y="157" width="72" height="52"/></g><g class="small center"><text x="206" y="189">A1</text><text x="286" y="189">B1</text><text x="366" y="189">A2</text><text x="446" y="189">C1</text><text x="526" y="189">B2</text><text x="606" y="189">free</text><text x="686" y="189">A3</text><text x="766" y="189">free</text></g>
+<g class="box soft"><rect x="40" y="270" width="820" height="75" rx="4"/></g><text x="70" y="300" class="label">逻辑连续，物理不必连续</text><text x="70" y="325" class="small">减少外部碎片与大块预留，代价是 block table 和管理开销。</text>
+</svg><figcaption>图：PagedAttention 把逻辑 KV 序列映射到固定大小的物理 block。</figcaption></figure>
+
+<p>PagedAttention 借鉴虚拟内存分页：逻辑上连续的 KV 可以放在不连续物理 block，block table 负责映射。请求增长时按需增加 block，结束后归还。</p>
+<p>它减少碎片和预留，不改变每个有效 token 必须保存 KV 的事实。</p>
+<h2 id="block-大小的权衡">Block 大小的权衡<a class="anchor" href="#block-大小的权衡" aria-label="链接到本节">#</a></h2>
+<ul>
+<li>block 大：表更小、管理开销低，但最后一个 block 浪费更多；</li>
+<li>block 小：碎片少，但元数据、分配和 kernel 处理更复杂。</li>
+</ul>
+<p>实际引擎还要考虑对齐、kernel 支持和 prefix cache，因此不是越小越好。</p>
+<h2 id="手算分页的最后一块">手算分页的最后一块<a class="anchor" href="#手算分页的最后一块" aria-label="链接到本节">#</a></h2>
+<p>假设每块容纳 16 个 token，三条互不共享前缀的活跃序列分别缓存 17、31、32 个 token。它们各需 2、2、2 块，共分配 96 个 token 槽位，实际写入 80 个，末块空余 16 个槽位：</p>
+<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 390" role="img" aria-label="三条序列按 16 token 一块分配 KV：17、31、32 token 各占两块，合计 96 个槽位，末块空余 16 个槽位" xmlns="http://www.w3.org/2000/svg">
+<text x="36" y="35" class="eyebrow">16 TOKENS / BLOCK · 3 ACTIVE REQUESTS</text>
+<g class="small"><text x="36" y="100">序列 A · 17</text><text x="36" y="176">序列 B · 31</text><text x="36" y="252">序列 C · 32</text></g>
+<g class="pages"><rect x="180" y="65" width="240" height="55"/><rect x="430" y="65" width="240" height="55"/><rect x="180" y="141" width="240" height="55"/><rect x="430" y="141" width="240" height="55"/><rect x="180" y="217" width="240" height="55"/><rect x="430" y="217" width="240" height="55"/></g>
+<g class="small center"><text x="300" y="98">16 / 16 已用</text><text x="550" y="98">1 / 16 已用</text><text x="300" y="174">16 / 16 已用</text><text x="550" y="174">15 / 16 已用</text><text x="300" y="250">16 / 16 已用</text><text x="550" y="250">16 / 16 已用</text></g>
+<g class="small"><text x="700" y="99">空 15 槽</text><text x="700" y="175">空 1 槽</text><text x="700" y="251">空 0 槽</text></g>
+<path class="axis" d="M180 295v12h490v-12"/><text x="425" y="338" class="label center">6 块 × 16 槽 = 96 槽</text><text x="425" y="367" class="small center">有效 80 · 末块空余 16（不含其他显存开销）</text>
+</svg>
+<figcaption>图：三个请求都需要两块，但末块的空槽随长度不同而变化。</figcaption></figure>
+
+<p>这里的空槽是分页内部碎片，不是额外的有效 KV token。按本章 128 KiB/token 的理论值计算，已写入 KV 约 10 MiB，若物理块在分配时完整占用，96 个槽位对应约 12 MiB 的块容量。实际预留和统计还取决于引擎的块分配、对齐、缓存复用及其他显存开销。不要把“节省最大上下文预留”误写成“没有碎片”。</p>
+<h3 id="block-table-怎样保持逻辑连续">block table 怎样保持逻辑连续<a class="anchor" href="#block-table-怎样保持逻辑连续" aria-label="链接到本节">#</a></h3>
+<p>请求的第 0、1、2 个逻辑块可以对应物理池中的不同位置，attention kernel 根据映射访问，而不是要求显存连续。请求增长时只补下一块，其他请求释放的块可以重新利用。这减少因最大长度预留和不连续空洞造成的浪费。</p>
+<p>最后一块仍可能未填满，metadata 与访问也有成本。分页优化的是分配组织，没有让同一个有效位置的 K/V 凭空变小；KV 精度和头数才影响公式里的单位大小。</p>
+<h2 id="prefix-caching">Prefix caching<a class="anchor" href="#prefix-caching" aria-label="链接到本节">#</a></h2>
+<p>很多请求共享相同 system prompt 或文档前缀。若 token 与模型配置完全匹配，可复用已有 KV block，减少重复 prefill。</p>
+<p>它不是普通文本 cache：chat template、token IDs、模型版本、LoRA、位置和多模态输入都可能影响可复用性。cache key 不完整会得到错误结果。</p>
+<h2 id="抢占与重计算">抢占与重计算<a class="anchor" href="#抢占与重计算" aria-label="链接到本节">#</a></h2>
+<p>KV 不足时，引擎可能暂停低优先级序列，释放或换出其 cache，之后重算或恢复。这样能避免立即拒绝请求，但会增加延迟和重复计算。监控 preemption 数量比只看 OOM 更早发现容量压力。</p>
+<h3 id="前缀共享与最终答案缓存的差别">前缀共享与最终答案缓存的差别<a class="anchor" href="#前缀共享与最终答案缓存的差别" aria-label="链接到本节">#</a></h3>
+<p>相同 token 前缀能复用对应计算，后续问题不同仍要继续 prefill 或 decode。模型版本、位置处理或 adapter 变化后，即使文字相同也不一定可复用。命中率高只说明复用机会多，最终答案质量与输出速度还受剩余计算影响。</p>
+<p>抢占后重算又可能重复读取同一段历史，提升可用性却降低有效吞吐。观察 block 使用率、抢占和重复计算，才能知道服务是否接近容量压力，而不必等到 OOM。</p>
+<h2 id="源码阅读路线">源码阅读路线<a class="anchor" href="#源码阅读路线" aria-label="链接到本节">#</a></h2>
+<p>vLLM 快照中的关键入口：</p>
+<pre><code class="language-text">vllm/v1/core/kv_cache_manager.py
+vllm/v1/core/kv_cache_utils.py
+vllm/v1/core/block_pool.py
+vllm/v1/attention/
+</code></pre>
+<p>阅读时追三个问题：谁请求 block、block 如何映射到请求、请求结束或抢占时谁释放。</p>
+<h2 id="常见误区">常见误区<a class="anchor" href="#常见误区" aria-label="链接到本节">#</a></h2>
+<ul>
+<li>最大上下文从 32K 改到 128K，不代表必须立即预留四倍 KV，但允许单请求增长到更大上限。</li>
+<li>量化权重到 INT4，不会自动量化 KV。</li>
+<li>GPU 显存还有空间，不代表 block 配置允许继续调度。</li>
+<li>KV cache 命中不是最终答案 cache，仍要执行后续 decode。</li>
+</ul>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="05-prefill-decode.html"><small>上一章</small><strong>推理的两幕：Prefill 与 Decode</strong></a><a class="next" href="07-continuous-batching.html"><small>下一章</small><strong>连续批处理：GPU 如何同时服务很多人</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>

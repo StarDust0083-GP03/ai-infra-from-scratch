@@ -1,0 +1,17 @@
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+*.db
+*.db-*
+.env
+.env.*
+*.pem
+*.key
+*.zip
+sources/repos/
+sources/web/
+*.fetch.log
+wiki/*-desktop.png
+wiki/*-mobile.png
+wiki/*-snapshot.txt

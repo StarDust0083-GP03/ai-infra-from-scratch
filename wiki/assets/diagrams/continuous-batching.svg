@@ -1,0 +1,7 @@
+<svg viewBox="0 0 900 420" role="img" aria-label="静态批处理与连续批处理时间线对比">
+<text x="40" y="38" class="eyebrow">BATCH SCHEDULING</text>
+<text x="40" y="90" class="label">静态批</text><g class="timeline"><rect x="150" y="62" width="180" height="45" class="seg one"/><rect x="330" y="62" width="350" height="45" class="seg two"/><rect x="680" y="62" width="120" height="45" class="seg four"/></g><text x="240" y="90" text-anchor="middle" class="small">短请求已完成</text><text x="505" y="90" text-anchor="middle" class="small">等待最长请求</text>
+<text x="40" y="178" class="label">连续批</text><g class="timeline"><rect x="150" y="145" width="120" height="45" class="seg one"/><rect x="270" y="145" width="100" height="45" class="seg three"/><rect x="370" y="145" width="150" height="45" class="seg two"/><rect x="520" y="145" width="90" height="45" class="seg five"/><rect x="610" y="145" width="190" height="45" class="seg one"/></g><g class="small center"><text x="210" y="173">A</text><text x="320" y="173">C 进入</text><text x="445" y="173">B</text><text x="565" y="173">D 进入</text><text x="705" y="173">混合执行</text></g>
+<g class="axis"><path d="M150 230H810"/></g><text x="150" y="255" class="small">iteration 1</text><text x="345" y="255" class="small">iteration 2</text><text x="540" y="255" class="small">iteration 3</text><text x="735" y="255" class="small">time →</text>
+<g class="box soft"><rect x="40" y="305" width="820" height="72" rx="4"/></g><text x="70" y="334" class="label">每轮重新装批</text><text x="70" y="359" class="small">完成的序列立即离开，新请求可进入；token budget 与 KV block 成为调度约束。</text>
+</svg>

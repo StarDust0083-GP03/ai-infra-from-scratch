@@ -1,0 +1,61 @@
+<!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>推理的两幕：Prefill 与 Decode · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 05</div><div class="rail-title">推理的两幕：Prefill 与 Decode</div><ol><li><a href="#prefill-做什么">Prefill 做什么</a></li><li><a href="#decode-做什么">Decode 做什么</a></li><li><a href="#为什么不能只优化一个阶段">为什么不能只优化一个阶段</a></li><li><a href="#chunked-prefill">Chunked Prefill</a></li><li><a href="#prefill-decode-分离">Prefill/Decode 分离</a></li><li><a href="#一个简单类比">一个简单类比</a></li><li><a href="#观测建议">观测建议</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 05 章</div><h1>推理的两幕：Prefill 与 Decode</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>自回归模型不是一次吐出整段答案。它先读取全部提示词建立内部状态，然后一轮一轮生成后续 token。这两段在 GPU 上的形状不同，指标也不同。</p>
+<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 380" role="img" aria-label="Prefill 批量处理提示词，Decode 逐步生成 token">
+<text x="40" y="38" class="eyebrow">TWO PHASES OF INFERENCE</text>
+<text x="40" y="94" class="label">Prefill</text><g class="tokens prompt"><rect x="150" y="68" width="62" height="44" rx="3"/><rect x="218" y="68" width="62" height="44" rx="3"/><rect x="286" y="68" width="62" height="44" rx="3"/><rect x="354" y="68" width="62" height="44" rx="3"/><rect x="422" y="68" width="62" height="44" rx="3"/><rect x="490" y="68" width="62" height="44" rx="3"/></g><text x="620" y="95" class="small">一次处理多个 prompt token</text>
+<text x="40" y="185" class="label">Decode</text><g class="tokens output"><rect x="150" y="159" width="62" height="44" rx="3"/><rect x="250" y="159" width="62" height="44" rx="3"/><rect x="350" y="159" width="62" height="44" rx="3"/><rect x="450" y="159" width="62" height="44" rx="3"/></g><g class="flow"><path d="M212 181H243"/><path d="M312 181H343"/><path d="M412 181H443"/></g><text x="620" y="185" class="small">每一步通常生成一个 token</text>
+<g class="box soft"><rect x="40" y="260" width="390" height="74" rx="4"/><rect x="470" y="260" width="390" height="74" rx="4"/></g><text x="65" y="291" class="label">Prefill：更容易吃满算力</text><text x="65" y="315" class="small">影响 TTFT</text><text x="495" y="291" class="label">Decode：反复读权重与 KV</text><text x="495" y="315" class="small">影响 TPOT / ITL</text>
+</svg><figcaption>图：Prefill 同时处理提示词，Decode 每轮推进一个生成位置。</figcaption></figure>
+
+<h2 id="prefill-做什么">Prefill 做什么<a class="anchor" href="#prefill-做什么" aria-label="链接到本节">#</a></h2>
+<p>假设 prompt 有 2000 个 token。Prefill 会让这些 token 通过模型各层，计算注意力并写入 KV cache。它能形成较大的矩阵乘，并行度较高，常更接近计算密集。</p>
+<p>Prefill 的直接用户指标是 TTFT，也就是从请求进入系统到第一个输出 token 出现的时间。TTFT 包含的不只是 prefill：</p>
+<pre><code class="language-text">TTFT = 网关 + 排队 + tokenize + prefill + 首 token 回传
+</code></pre>
+<p>因此 TTFT 高时不能直接断言 prefill 慢。</p>
+<h2 id="decode-做什么">Decode 做什么<a class="anchor" href="#decode-做什么" aria-label="链接到本节">#</a></h2>
+<p>第一个 token 生成后，新 token 被追加到上下文。下一轮只新增一个位置，但它需要读取历史 KV，并经过模型所有层。过程重复到停止条件。</p>
+<p>用户感受到的生成流畅度常用：</p>
+<ul>
+<li>TPOT：每个输出 token 的平均时间；</li>
+<li>ITL：相邻 token 的延迟，可看分布；</li>
+<li>output tokens/s：单请求或系统总生成吞吐。</li>
+</ul>
+<p>如果中途某几轮突然变慢，平均 TPOT 可能掩盖卡顿，应看 ITL 分位数和时间序列。</p>
+<h3 id="读取长题目和续写长答案-是两种压力">读取长题目和续写长答案，是两种压力<a class="anchor" href="#读取长题目和续写长答案-是两种压力" aria-label="链接到本节">#</a></h3>
+<p>长 prompt 的多个位置可以在 prefill 中并行处理，但生成的新位置依赖前一轮结果，单条序列不能一次并行写出全部答案。将许多序列一起 decode，能提高跨请求并行度，却没有消除每条序列内部的顺序依赖。</p>
+<p>因此长输入短答案常把压力放在首 token 之前，短输入长答案则可能首 token 很快、后续占卡很久。总耗时相近的两种请求，对调度和产品体验要求不同。</p>
+<h2 id="为什么不能只优化一个阶段">为什么不能只优化一个阶段<a class="anchor" href="#为什么不能只优化一个阶段" aria-label="链接到本节">#</a></h2>
+<p>增大 prefill chunk 可以更快吃完长 prompt，却可能让 decode 请求等待更久。优先 decode 可改善正在生成用户的流畅度，却让新请求 TTFT 上升。</p>
+<p>调度器必须在以下目标间取舍：</p>
+<ul>
+<li>新请求尽快拿到首 token；</li>
+<li>已开始的请求稳定生成；</li>
+<li>GPU 保持高利用；</li>
+<li>KV cache 不超容量；</li>
+<li>长请求不能饿死短请求，反之亦然。</li>
+</ul>
+<h2 id="chunked-prefill">Chunked Prefill<a class="anchor" href="#chunked-prefill" aria-label="链接到本节">#</a></h2>
+<p>长 prompt 不必在一个 iteration 全部处理。可以拆成 chunk，与 decode token 共享每轮 token budget。这样减少一次巨大 prefill 阻塞，但增加调度轮数和策略参数。</p>
+<p><code>max_num_batched_tokens</code> 一类配置本质上在控制每轮工作量。设置大通常偏吞吐，设置小可能偏交互延迟，但结果依赖模型、硬件和长度分布。</p>
+<h3 id="切小-prefill-怎样帮助正在生成的用户">切小 prefill 怎样帮助正在生成的用户<a class="anchor" href="#切小-prefill-怎样帮助正在生成的用户" aria-label="链接到本节">#</a></h3>
+<p>假设当前有十条序列等待下一 token，新长 prompt 一次占用很大的迭代工作量，它们会等本轮结束。把 prompt 拆成 chunk，调度器可以在轮次之间给 decode 留份额，减少长输入连续阻塞。</p>
+<p>切分也有代价：更多轮次与管理，且新请求读完整 prompt 才能生成首 token。不能同时保证所有长度的 TTFT、ITL 和最大吞吐都最优，需要按真实流量确定优先目标。</p>
+<h2 id="prefill-decode-分离">Prefill/Decode 分离<a class="anchor" href="#prefill-decode-分离" aria-label="链接到本节">#</a></h2>
+<p>更大规模服务可让不同 worker 分别处理 prefill 和 decode，再传输 KV。优点是两类负载可独立扩缩和调优，缺点是需要高速 KV 传输、路由和故障处理。</p>
+<p>判断是否值得分离前先量化：</p>
+<ul>
+<li>prefill 与 decode 各自占多少 GPU 时间；</li>
+<li>KV 传输量和互联带宽；</li>
+<li>长 prompt 是否真的干扰 decode；</li>
+<li>分离后的空闲和排队是否更少。</li>
+</ul>
+<p>复杂架构不能凭示意图证明更快。</p>
+<h2 id="一个简单类比">一个简单类比<a class="anchor" href="#一个简单类比" aria-label="链接到本节">#</a></h2>
+<p>Prefill 像读完题目并做笔记，Decode 像每次只写一个字但不断翻阅笔记。题目长会推迟开写，答案长会延长逐字生成。</p>
+<h3 id="分离前先算-kv-交接的成本">分离前先算 KV 交接的成本<a class="anchor" href="#分离前先算-kv-交接的成本" aria-label="链接到本节">#</a></h3>
+<p>Prefill worker 处理完以后，decode worker 需要历史 KV。其传输量由上下文、层数、KV heads 和精度决定，不是只发几个 token ID。长文的计算节省若被网络传输吃掉，拆开两组 worker 可能更慢。</p>
+<p>因此先测两阶段 GPU 时间和传输量，再比较独立调度的收益。低流量下两组都可能空闲，多增加一条故障与路由链，也应计入采用成本。</p>
+<h2 id="观测建议">观测建议<a class="anchor" href="#观测建议" aria-label="链接到本节">#</a></h2>
+<p>至少分别记录：prompt tokens、output tokens、queue time、prefill time、decode time、TTFT 和 TPOT。只记录总延迟无法解释是长输入、长输出还是排队造成。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="04-memory-accounting.html"><small>上一章</small><strong>显存账本：模型到底占多少</strong></a><a class="next" href="06-kv-cache.html"><small>下一章</small><strong>KV Cache：上下文为什么越来越贵</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>

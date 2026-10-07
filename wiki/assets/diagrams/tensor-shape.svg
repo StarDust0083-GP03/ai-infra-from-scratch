@@ -1,0 +1,7 @@
+<svg viewBox="0 0 900 330" role="img" aria-label="token、向量、矩阵和批次的关系">
+<text x="40" y="38" class="eyebrow">FROM TEXT TO TENSORS</text>
+<g class="box"><rect x="40" y="82" width="175" height="90" rx="4"/><rect x="270" y="82" width="150" height="90" rx="4"/><rect x="475" y="82" width="175" height="90" rx="4"/><rect x="705" y="82" width="155" height="90" rx="4"/></g>
+<g class="label"><text x="128" y="116" text-anchor="middle">文字</text><text x="128" y="143" text-anchor="middle" class="small">“GPU 很忙”</text><text x="345" y="116" text-anchor="middle">Token IDs</text><text x="345" y="143" text-anchor="middle" class="mono">[41, 908, 7]</text><text x="562" y="116" text-anchor="middle">Embedding</text><text x="562" y="143" text-anchor="middle" class="small">3 × hidden_size</text><text x="782" y="116" text-anchor="middle">Batch Tensor</text><text x="782" y="143" text-anchor="middle" class="small">B × S × H</text></g>
+<g class="flow"><path d="M215 127H270"/><path d="M420 127H475"/><path d="M650 127H705"/></g>
+<text x="40" y="230" class="label">只记三个字母</text><g class="box soft"><rect x="40" y="252" width="820" height="50" rx="4"/></g><text x="95" y="283" class="mono accent">B</text><text x="120" y="283" class="small">batch size</text><text x="345" y="283" class="mono accent">S</text><text x="370" y="283" class="small">sequence length</text><text x="640" y="283" class="mono accent">H</text><text x="665" y="283" class="small">hidden size</text>
+</svg>

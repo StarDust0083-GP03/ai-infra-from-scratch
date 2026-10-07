@@ -1,0 +1,6 @@
+<svg viewBox="0 0 900 390" role="img" aria-label="连续显存分配与分页 KV block 对比">
+<text x="40" y="38" class="eyebrow">CONTIGUOUS VS PAGED KV CACHE</text>
+<text x="40" y="92" class="label">连续预留</text><g class="memory"><rect x="170" y="64" width="600" height="52" rx="3"/><rect x="170" y="64" width="280" height="52" class="used"/><rect x="450" y="64" width="320" height="52" class="waste"/></g><text x="790" y="96" class="small">预留但未用</text>
+<text x="40" y="185" class="label">Paged blocks</text><g class="pages"><rect x="170" y="157" width="72" height="52"/><rect x="250" y="157" width="72" height="52"/><rect x="330" y="157" width="72" height="52"/><rect x="410" y="157" width="72" height="52"/><rect x="490" y="157" width="72" height="52"/><rect x="570" y="157" width="72" height="52"/><rect x="650" y="157" width="72" height="52"/><rect x="730" y="157" width="72" height="52"/></g><g class="small center"><text x="206" y="189">A1</text><text x="286" y="189">B1</text><text x="366" y="189">A2</text><text x="446" y="189">C1</text><text x="526" y="189">B2</text><text x="606" y="189">free</text><text x="686" y="189">A3</text><text x="766" y="189">free</text></g>
+<g class="box soft"><rect x="40" y="270" width="820" height="75" rx="4"/></g><text x="70" y="300" class="label">逻辑连续，物理不必连续</text><text x="70" y="325" class="small">减少外部碎片与大块预留，代价是 block table 和管理开销。</text>
+</svg>

@@ -1,0 +1,8 @@
+<svg viewBox="0 0 900 450" role="img" aria-label="Kubernetes 从节点 GPU 到 Pod 资源请求的控制链路">
+<text x="40" y="38" class="eyebrow">HOW KUBERNETES SEES A GPU</text>
+<g class="box"><rect x="50" y="75" width="180" height="78" rx="4"/><rect x="280" y="75" width="180" height="78" rx="4"/><rect x="510" y="75" width="180" height="78" rx="4"/><rect x="735" y="75" width="125" height="78" rx="4"/></g>
+<g class="label center"><text x="140" y="108">GPU / Driver</text><text x="370" y="108">Device Plugin</text><text x="600" y="108">Kubelet</text><text x="797" y="108">API Server</text></g><g class="small center"><text x="140" y="133">节点硬件</text><text x="370" y="133">发现与 Allocate</text><text x="600" y="133">注册 extended resource</text><text x="797" y="133">Node status</text></g>
+<g class="flow"><path d="M230 114H280"/><path d="M460 114H510"/><path d="M690 114H735"/></g>
+<g class="box soft"><rect x="180" y="235" width="540" height="122" rx="4"/></g><text x="450" y="270" text-anchor="middle" class="label">Pod spec</text><text x="450" y="307" text-anchor="middle" class="mono accent">limits: { nvidia.com/gpu: 1 }</text><text x="450" y="335" text-anchor="middle" class="small">Scheduler 按资源数量和节点约束放置 Pod</text>
+<path d="M797 160C797 220 720 220 720 270" class="dashed"/><text x="40" y="410" class="small">模型显存需求、KV 热度、NVLink 域和作业 gang 需要额外调度信息或上层系统表达。</text>
+</svg>

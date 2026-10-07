@@ -1,0 +1,99 @@
+<!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>GPU 不是更快的 CPU · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 03</div><div class="rail-title">GPU 不是更快的 CPU</div><ol><li><a href="#一张卡里的四个角色">一张卡里的四个角色</a></li><li><a href="#roofline-先判断是哪种上限">Roofline：先判断是哪种上限</a></li><li><a href="#为什么-decode-容易带宽受限">为什么 Decode 容易带宽受限</a></li><li><a href="#cuda-是什么层">CUDA 是什么层</a></li><li><a href="#看哪些硬件指标">看哪些硬件指标</a></li><li><a href="#第一条性能纪律">第一条性能纪律</a></li><li><a href="#来源入口">来源入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 03 章</div><h1>GPU 不是更快的 CPU</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>CPU 擅长少量复杂线程、分支和低延迟响应。GPU 用大量较简单的执行单元同时处理规则数据，擅长矩阵乘和向量操作。把串行 Python 搬到 GPU 上不会自动变快，任务要有足够并行度，数据移动成本也要值得。</p>
+<h2 id="一张卡里的四个角色">一张卡里的四个角色<a class="anchor" href="#一张卡里的四个角色" aria-label="链接到本节">#</a></h2>
+<h3 id="计算单元">计算单元<a class="anchor" href="#计算单元" aria-label="链接到本节">#</a></h3>
+<p>CUDA cores 和 tensor cores 执行算术。厂商给出的峰值 FLOPS 依赖数据类型、稀疏条件和特定指令，不能直接当作应用速度。</p>
+<h3 id="hbm-或显存">HBM 或显存<a class="anchor" href="#hbm-或显存" aria-label="链接到本节">#</a></h3>
+<p>模型权重和运行 tensor 放在设备显存。容量决定能否装下，带宽决定每秒能搬多少。decode 常反复读取大量权重，因此即使算术不多，也可能被带宽卡住。</p>
+<h3 id="cache-与-shared-memory">Cache 与 shared memory<a class="anchor" href="#cache-与-shared-memory" aria-label="链接到本节">#</a></h3>
+<p>更靠近计算单元的小容量高速存储。好的 kernel 会复用数据，减少往返 HBM。FlashAttention 的核心贡献之一就是 IO-aware 分块，减少慢层级的数据移动，而不是近似注意力结果。</p>
+<h3 id="互联">互联<a class="anchor" href="#互联" aria-label="链接到本节">#</a></h3>
+<p>PCIe、NVLink、NVSwitch、InfiniBand 或 RoCE 连接 CPU、GPU 和其他节点。多卡性能由最慢的必要通信路径约束。</p>
+<h2 id="roofline-先判断是哪种上限">Roofline：先判断是哪种上限<a class="anchor" href="#roofline-先判断是哪种上限" aria-label="链接到本节">#</a></h2>
+<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 390" role="img" aria-label="Roofline 模型显示带宽瓶颈和计算瓶颈">
+<text x="40" y="38" class="eyebrow">ROOFLINE MENTAL MODEL</text>
+<g class="axis"><path d="M100 315V70M100 315H840"/></g>
+<text x="45" y="190" transform="rotate(-90 45 190)" class="small">可达到的性能</text><text x="470" y="360" text-anchor="middle" class="small">算术强度：每搬一个字节做多少计算 →</text>
+<path d="M110 305L500 105H825" class="roof"/>
+<line x1="500" y1="315" x2="500" y2="105" class="dashed"/>
+<text x="260" y="195" class="label accent">带宽受限</text><text x="260" y="220" class="small">先减少数据搬运</text><text x="660" y="90" class="label accent">计算受限</text><text x="660" y="130" class="small">再提高 kernel 效率</text>
+<circle cx="245" cy="245" r="8" class="dot"/><text x="260" y="270" class="small">常见 decode</text><circle cx="625" cy="105" r="8" class="dot"/><text x="600" y="155" class="small">大矩阵乘</text>
+</svg><figcaption>图：Roofline 把性能上限分成带宽斜坡和计算平台。</figcaption></figure>
+
+<p>算术强度表示每读取一个 byte 做多少计算：</p>
+<pre><code class="language-text">arithmetic intensity = operations / bytes moved
+</code></pre>
+<ul>
+<li>算术强度低，点落在斜坡，优先减少数据搬运或提高复用；</li>
+<li>算术强度高，点接近平台，优先提高 kernel 与 tensor core 利用；</li>
+<li>实际性能还会受调度、同步、分支和 launch 开销影响。</li>
+</ul>
+<p>Roofline 不是精确预测器，而是阻止错误优化方向的地图。</p>
+<h3 id="用一个假设硬件手算-roofline">用一个假设硬件手算 Roofline<a class="anchor" href="#用一个假设硬件手算-roofline" aria-label="链接到本节">#</a></h3>
+<p>假设有效显存带宽上限为 1 TB/s，目标精度计算上限为 100 TFLOP/s。算术强度为 10 FLOP/byte 的任务，带宽允许约 10 TFLOP/s，远未碰到计算平台；强度为 200 时，带宽给出 200 TFLOP/s，但计算平台只允许 100。上限取两者较小值。</p>
+<p>这些是教学数字，不是某张卡的实测。实际 kernel 还受数据布局、并行度和同步影响。若任务在带宽斜坡，增加算术峰值未必有效；减少数据移动或提高一次读取的复用才更贴近瓶颈。</p>
+<h2 id="为什么-decode-容易带宽受限">为什么 Decode 容易带宽受限<a class="anchor" href="#为什么-decode-容易带宽受限" aria-label="链接到本节">#</a></h2>
+<p>每个 decode step 只为每条序列生成少量新 token，却要经过模型全部层并读取权重。batch 太小时，一次读权重只服务少量 token，算术强度低。增大活跃 batch 可提高复用，但会消耗更多 KV cache，并增加排队与尾延迟。</p>
+<p>这就是在线推理的基本矛盾：</p>
+<pre><code class="language-text">更大 batch -&gt; 通常吞吐更高
+更长等待 -&gt; TTFT 与尾延迟可能更差
+</code></pre>
+<h2 id="cuda-是什么层">CUDA 是什么层<a class="anchor" href="#cuda-是什么层" aria-label="链接到本节">#</a></h2>
+<p>CUDA 包含编程模型、运行时、编译工具和库。PyTorch、vLLM 等框架通过 CUDA kernel 操作 GPU。日常部署不必自己写 kernel，但要理解：</p>
+<ul>
+<li>GPU 操作通常异步提交；</li>
+<li>测时前后可能需要同步，否则只测到 launch；</li>
+<li>不同 stream 可以重叠，但依赖必须显式满足；</li>
+<li>第一次调用可能包含编译、图捕获或 cache warmup；</li>
+<li>allocator 可能保留显存，所以 <code>nvidia-smi</code> 不等于活跃 tensor 总和。</li>
+</ul>
+<h3 id="异步提交为什么容易测出虚假的加速">异步提交为什么容易测出虚假的加速<a class="anchor" href="#异步提交为什么容易测出虚假的加速" aria-label="链接到本节">#</a></h3>
+<p>CPU 发出 kernel 后可能立即返回，GPU 还在计算。只用主机时钟围住 Python 调用，可能主要测到提交开销。应使用适当 CUDA 事件或同步边界测实际 GPU 工作，并区分 warmup 与稳定运行。</p>
+<p>同步也会改变实验环境：逐个算子强制同步可能破坏原本重叠。先明确测的是单算子还是端到端吞吐，再选计时方式，不把两者结果混在一张表里。</p>
+<h2 id="看哪些硬件指标">看哪些硬件指标<a class="anchor" href="#看哪些硬件指标" aria-label="链接到本节">#</a></h2>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>指标</th>
+<th>回答的问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>SM / tensor core 利用</td>
+<td>计算单元是否有工作</td>
+</tr>
+<tr>
+<td>HBM 带宽利用</td>
+<td>是否在大量搬显存数据</td>
+</tr>
+<tr>
+<td>显存占用</td>
+<td>容量还有多少余量</td>
+</tr>
+<tr>
+<td>PCIe / NVLink 流量</td>
+<td>多卡或 CPU-GPU 搬运是否重</td>
+</tr>
+<tr>
+<td>功耗与频率</td>
+<td>是否降频或受功率限制</td>
+</tr>
+<tr>
+<td>kernel 时间与空隙</td>
+<td>GPU 是否在等待 CPU 或调度</td>
+</tr>
+</tbody></table></div>
+<p>“GPU 利用率 100%”本身不能说明效率。一个低效 kernel 也能让卡一直忙。</p>
+<h2 id="第一条性能纪律">第一条性能纪律<a class="anchor" href="#第一条性能纪律" aria-label="链接到本节">#</a></h2>
+<p>先记录工作负载，再记录硬件：模型版本、精度、输入输出长度分布、并发、batch 策略、GPU 型号、拓扑和软件版本。没有这些上下文的性能数字无法复现。</p>
+<h3 id="卡一直忙-为什么请求还很慢">卡一直忙，为什么请求还很慢<a class="anchor" href="#卡一直忙-为什么请求还很慢" aria-label="链接到本节">#</a></h3>
+<p>GPU utilization 高说明采样期间设备有工作，不说明每秒完成多少有用 token。反复重算、低效内存访问或通信 kernel 都可能让卡忙。结合吞吐、HBM 流量和 kernel 时间判断，再看是否存在 CPU 等待空隙。性能结论需要工作负载形状作为背景，不能只比较一条利用率曲线。</p>
+<h2 id="来源入口">来源入口<a class="anchor" href="#来源入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li>NVIDIA GPU Performance Background</li>
+<li>CUDA C++ Best Practices Guide</li>
+<li>Roofline technical report</li>
+<li>FlashAttention paper</li>
+<li>PyTorch CUDA semantics</li>
+</ul>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="02-model-basics.html"><small>上一章</small><strong>最少模型知识：token、tensor 与参数</strong></a><a class="next" href="04-memory-accounting.html"><small>下一章</small><strong>显存账本：模型到底占多少</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>

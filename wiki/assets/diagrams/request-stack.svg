@@ -1,0 +1,9 @@
+<svg viewBox="0 0 900 360" role="img" aria-label="一次推理请求从客户端经过网关、调度器到 GPU 的路径">
+<defs><marker id="rq" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" class="arrow-fill"/></marker></defs>
+<text x="40" y="38" class="eyebrow">CONTROL PLANE + DATA PLANE</text>
+<g class="box"><rect x="40" y="80" width="130" height="82" rx="4"/><rect x="220" y="80" width="130" height="82" rx="4"/><rect x="400" y="80" width="130" height="82" rx="4"/><rect x="580" y="80" width="130" height="82" rx="4"/><rect x="760" y="80" width="100" height="82" rx="4"/></g>
+<g class="label"><text x="105" y="115" text-anchor="middle">客户端</text><text x="105" y="140" text-anchor="middle" class="small">HTTP / stream</text><text x="285" y="115" text-anchor="middle">网关</text><text x="285" y="140" text-anchor="middle" class="small">鉴权 · 限流</text><text x="465" y="115" text-anchor="middle">服务副本</text><text x="465" y="140" text-anchor="middle" class="small">tokenize · queue</text><text x="645" y="115" text-anchor="middle">引擎调度器</text><text x="645" y="140" text-anchor="middle" class="small">batch · KV block</text><text x="810" y="115" text-anchor="middle">GPU</text><text x="810" y="140" text-anchor="middle" class="small">kernel</text></g>
+<g class="flow" marker-end="url(#rq)"><path d="M170 121H213"/><path d="M350 121H393"/><path d="M530 121H573"/><path d="M710 121H753"/></g>
+<g class="box soft"><rect x="220" y="230" width="490" height="76" rx="4"/></g><text x="465" y="260" text-anchor="middle" class="label">集群控制面</text><text x="465" y="285" text-anchor="middle" class="small">Kubernetes · Device Plugin · Operator · Scheduler</text>
+<g class="dashed"><path d="M285 230V170"/><path d="M465 230V170"/><path d="M645 230V170"/></g>
+</svg>

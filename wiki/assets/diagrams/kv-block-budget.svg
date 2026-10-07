@@ -1,0 +1,8 @@
+<svg viewBox="0 0 900 390" role="img" aria-label="三条序列按 16 token 一块分配 KV：17、31、32 token 各占两块，合计 96 个槽位，末块空余 16 个槽位" xmlns="http://www.w3.org/2000/svg">
+<text x="36" y="35" class="eyebrow">16 TOKENS / BLOCK · 3 ACTIVE REQUESTS</text>
+<g class="small"><text x="36" y="100">序列 A · 17</text><text x="36" y="176">序列 B · 31</text><text x="36" y="252">序列 C · 32</text></g>
+<g class="pages"><rect x="180" y="65" width="240" height="55"/><rect x="430" y="65" width="240" height="55"/><rect x="180" y="141" width="240" height="55"/><rect x="430" y="141" width="240" height="55"/><rect x="180" y="217" width="240" height="55"/><rect x="430" y="217" width="240" height="55"/></g>
+<g class="small center"><text x="300" y="98">16 / 16 已用</text><text x="550" y="98">1 / 16 已用</text><text x="300" y="174">16 / 16 已用</text><text x="550" y="174">15 / 16 已用</text><text x="300" y="250">16 / 16 已用</text><text x="550" y="250">16 / 16 已用</text></g>
+<g class="small"><text x="700" y="99">空 15 槽</text><text x="700" y="175">空 1 槽</text><text x="700" y="251">空 0 槽</text></g>
+<path class="axis" d="M180 295v12h490v-12"/><text x="425" y="338" class="label center">6 块 × 16 槽 = 96 槽</text><text x="425" y="367" class="small center">有效 80 · 末块空余 16（不含其他显存开销）</text>
+</svg>

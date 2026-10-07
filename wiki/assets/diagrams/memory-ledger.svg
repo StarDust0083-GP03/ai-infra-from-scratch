@@ -1,0 +1,8 @@
+<svg viewBox="0 0 900 380" role="img" aria-label="训练和推理的显存构成对比">
+<text x="40" y="38" class="eyebrow">GPU MEMORY LEDGER</text>
+<text x="40" y="84" class="label">推理</text><g><rect x="130" y="62" width="300" height="44" class="seg one"/><rect x="430" y="62" width="180" height="44" class="seg two"/><rect x="610" y="62" width="130" height="44" class="seg three"/><rect x="740" y="62" width="120" height="44" class="seg four"/></g>
+<g class="small center"><text x="280" y="90">权重</text><text x="520" y="90">KV Cache</text><text x="675" y="90">Workspace</text><text x="800" y="90">余量</text></g>
+<text x="40" y="174" class="label">训练</text><g><rect x="130" y="152" width="150" height="44" class="seg one"/><rect x="280" y="152" width="105" height="44" class="seg two"/><rect x="385" y="152" width="225" height="44" class="seg three"/><rect x="610" y="152" width="130" height="44" class="seg five"/><rect x="740" y="152" width="120" height="44" class="seg four"/></g>
+<g class="small center"><text x="205" y="180">权重</text><text x="332" y="180">梯度</text><text x="497" y="180">优化器</text><text x="675" y="180">激活</text><text x="800" y="180">缓冲</text></g>
+<g class="box soft"><rect x="40" y="252" width="820" height="82" rx="4"/></g><text x="70" y="282" class="label">公式只是下界</text><text x="70" y="309" class="small">allocator 保留、CUDA graph、通信 buffer、临时 tensor 与碎片都要实测。</text>
+</svg>

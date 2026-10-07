@@ -1,0 +1,6 @@
+<svg viewBox="0 0 900 390" role="img" aria-label="推理请求延迟瀑布图">
+<text x="40" y="38" class="eyebrow">LATENCY WATERFALL</text>
+<g class="timeline"><rect x="70" y="90" width="90" height="62" class="seg four"/><rect x="160" y="90" width="160" height="62" class="seg two"/><rect x="320" y="90" width="120" height="62" class="seg three"/><rect x="440" y="90" width="310" height="62" class="seg one"/><rect x="750" y="90" width="90" height="62" class="seg five"/></g>
+<g class="small center"><text x="115" y="124">网关</text><text x="240" y="124">排队</text><text x="380" y="124">Prefill</text><text x="595" y="124">Decode</text><text x="795" y="124">回传</text></g>
+<path d="M70 205H440" class="measure"/><text x="255" y="230" text-anchor="middle" class="label">TTFT</text><path d="M440 275H750" class="measure"/><text x="595" y="300" text-anchor="middle" class="label">生成阶段：TPOT / ITL</text><path d="M70 345H840" class="measure"/><text x="455" y="372" text-anchor="middle" class="small">E2E latency</text>
+</svg>
