@@ -1,77 +1,38 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>数据管道与 Checkpoint · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 13</div><div class="rail-title">数据管道与 Checkpoint</div><ol><li><a href="#数据路径">数据路径</a></li><li><a href="#sharding-与顺序">Sharding 与顺序</a></li><li><a href="#checkpoint-保存什么">Checkpoint 保存什么</a></li><li><a href="#分布式-checkpoint">分布式 Checkpoint</a></li><li><a href="#一致性与原子提交">一致性与原子提交</a></li><li><a href="#同步与异步保存">同步与异步保存</a></li><li><a href="#保存频率怎么算">保存频率怎么算</a></li><li><a href="#推理也需要持久化吗">推理也需要持久化吗</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 13 章</div><h1>数据管道与 Checkpoint</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>昂贵 GPU 等数据，是最容易被误认为“模型慢”的问题之一。训练系统还必须定期保存足够状态，以便故障后恢复，而不是从第 0 步重来。</p>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 13</div><div class="rail-title">数据管道与 Checkpoint</div><ol><li><a href="#数据路径">数据路径</a></li><li><a href="#sharding-与顺序">Sharding 与顺序</a></li><li><a href="#checkpoint-保存什么">Checkpoint 保存什么</a></li><li><a href="#分布式-checkpoint">分布式 Checkpoint</a></li><li><a href="#一致性与原子提交">一致性与原子提交</a></li><li><a href="#同步与异步保存">同步与异步保存</a></li><li><a href="#保存频率怎么算">保存频率怎么算</a></li><li><a href="#推理也需要持久化吗">推理也需要持久化吗</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 13 章</div><h1>数据管道与 Checkpoint</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>训练需要持续送入正确数据，也需要把可恢复状态交给存储。两条链分别决定设备是否空等，以及失败后会退回哪里。文件写出来和训练能够恢复，是不同的验收标准。</p>
 <h2 id="数据路径">数据路径<a class="anchor" href="#数据路径" aria-label="链接到本节">#</a></h2>
-<pre><code class="language-text">对象存储 / 文件系统
-  -&gt; shard 列表
-  -&gt; worker 读取与解码
-  -&gt; tokenize / pack
-  -&gt; host memory
-  -&gt; H2D copy
-  -&gt; GPU batch
-</code></pre>
-<p>每一段都可能产生背压。GPU 空闲时先看 dataloader queue 和 copy 时间，不要立即改模型 kernel。</p>
+<p>校对文本从远端分片进入读取 worker，经过解码、分词或 packing，在主机内存形成 batch，再传到设备。任何一段供给不足都可能让后面停顿。</p>
+<p>可分别测远端读取、worker 处理、就绪队列和主机到设备拷贝。若就绪队列长期为空而设备有空隙，应先检查供给；如果队列充足却传输迟缓，再看内存、拷贝与依赖。</p>
 <h2 id="sharding-与顺序">Sharding 与顺序<a class="anchor" href="#sharding-与顺序" aria-label="链接到本节">#</a></h2>
-<p>数据并行 rank 应读取不同样本，又要保证：</p>
-<ul>
-<li>epoch 覆盖正确；</li>
-<li>shuffle 可复现；</li>
-<li>resume 后不大量重复或漏数据；</li>
-<li>worker 数变化时语义明确；</li>
-<li>不同长度样本 packing 策略一致。</li>
-</ul>
-<p>只保存 global step 不一定能恢复数据位置。dataloader 或 sampler state 也是 checkpoint 的一部分。</p>
+<p>数据并行副本需要有明确的样本分配，避免无意重复或遗漏。shuffle 种子、epoch、分片清单和 packing 规则共同决定数据顺序，worker 数变化也可能改变读取方式。</p>
+<p>这些配置应与数据版本一起保存。吞吐比较中若同时改变 packing，样本数相同也不一定代表有效 token 数相同。</p>
 <h3 id="从同一-step-恢复-为什么还可能读到不同数据">从同一 step 恢复，为什么还可能读到不同数据<a class="anchor" href="#从同一-step-恢复-为什么还可能读到不同数据" aria-label="链接到本节">#</a></h3>
-<p>global step 只表示完成了多少更新，不完整描述哪个 shard、sample 或随机排列已被消费。恢复时若 sampler 从头开始，程序能继续，却可能重复大量样本；改变 worker 数也可能改变切分。等价恢复需要数据位置和随机状态与模型状态一起对应。</p>
-<p>输入 packing 还影响有效 token 数。相同样本数若使用不同长度合并规则，batch 形状和训练吞吐都会变化。数据版本与读取策略属于运行合同，不应只记录模型 commit。</p>
+<p>第 420 次更新结束，不足以说明第几个分片的哪个位置被消费。若模型恢复到这里，而 sampler 回到开头，程序可以继续运行，却会重新读取旧样本。</p>
+<p>恢复合同要说明数据游标、随机状态和已预取数据怎样处理。对于无法做到严格等价的流式数据，明确允许重复或跳过的范围，而不是用“已 resume”掩盖差异。</p>
 <h2 id="checkpoint-保存什么">Checkpoint 保存什么<a class="anchor" href="#checkpoint-保存什么" aria-label="链接到本节">#</a></h2>
-<p>一次可恢复训练通常需要：</p>
-<ul>
-<li>模型参数；</li>
-<li>optimizer state；</li>
-<li>learning-rate scheduler；</li>
-<li>当前 step；</li>
-<li>RNG state；</li>
-<li>data loader/sampler state；</li>
-<li>loss scaler 或其他数值状态；</li>
-<li>并行与模型配置；</li>
-<li>代码和数据版本引用。</li>
-</ul>
-<p>漏掉 RNG 与数据位置，程序仍能继续跑，但不再是等价恢复。</p>
+<p>可继续训练的状态通常包含参数、优化器、步数和学习率计划，还要考虑 RNG、数值缩放、数据位置以及模型与并行配置。代码和数据版本引用用于解释这份状态属于哪种运行。</p>
+<p>参数文件只够回答“模型现在是什么值”，不足以回答“下一次应读什么、怎样更新”。保存前按恢复目标列清单，避免到事故后才发现缺了关键状态。</p>
 <h2 id="分布式-checkpoint">分布式 Checkpoint<a class="anchor" href="#分布式-checkpoint" aria-label="链接到本节">#</a></h2>
-<p>大状态不应由 rank 0 收集后写一个巨型文件，这会造成内存峰值和单点瓶颈。分布式 checkpoint 让各 rank 写 shard，并保存可描述全局 tensor 的 metadata。</p>
-<p>恢复到不同 world size 时，需要 reshard。格式应表达全局 shape 和 shard placement，而不是把当前 rank 编号写死成长期合同。</p>
+<p>让单个 rank 汇总全部状态，可能造成巨大的内存峰值和写入瓶颈。分布式保存由多个参与者写各自分片，metadata 描述全局 tensor 与片段位置。</p>
+<p>若计划改变 world size 恢复，格式和恢复器必须支持重新切分。长期格式不能只留下“rank 3 的文件”而失去全局形状和归属含义。</p>
 <h2 id="一致性与原子提交">一致性与原子提交<a class="anchor" href="#一致性与原子提交" aria-label="链接到本节">#</a></h2>
-<p>一个可用 checkpoint 应满足“要么完整可见，要么不可见”。常见过程：</p>
-<ol>
-<li>各 rank 写临时 shard；</li>
-<li>校验完成和大小；</li>
-<li>写 metadata；</li>
-<li>最后提交完成标记或原子重命名；</li>
-<li>更新 latest 指针。</li>
-</ol>
-<p>若只看目录存在就恢复，可能读到一半成功的 checkpoint。</p>
+<p>一次保存可先写临时对象，再确认分片与元数据满足完整性条件，最后发布提交记录。读取方只选择已经提交的版本，<code>latest</code> 也应指向可用版本。</p>
+<p>底层存储的重命名和一致性语义不同，不能假设对象存储具有本地文件系统一样的原子操作。协议必须按实际存储能力实现。</p>
 <h3 id="完成标记为什么要最后写">完成标记为什么要最后写<a class="anchor" href="#完成标记为什么要最后写" aria-label="链接到本节">#</a></h3>
-<p>四个 rank 只有三个 shard 写完，目录已经存在但 checkpoint 不完整。恢复端应读取已提交 metadata 与完成状态，而非猜目录里有哪些文件。临时对象可保留用于诊断，但不能更新 latest 指针让新任务误用。</p>
-<p>异步保存也需要稳定快照：训练继续修改 GPU 参数时，后台应写已 stage 的一致数据，不能拿变化中的 tensor 引用边读边存。CPU 内存和拷贝时间是缩短 GPU 暂停所付出的代价。</p>
+<p>假设八个分片只完成七个，目录和多数文件都已出现。若恢复器凭目录名选最新，就会读到不完整状态。提交记录要在完整性验证后才可见，失败尝试不应覆盖已知可用的指针。</p>
+<p>校验还要覆盖预期对象集合、尺寸或校验值，以及 metadata 是否匹配。仅检查“存在八个文件”无法排除写错内容或混入旧分片。</p>
 <h2 id="同步与异步保存">同步与异步保存<a class="anchor" href="#同步与异步保存" aria-label="链接到本节">#</a></h2>
-<p>同步 checkpoint 停止训练直到写完，简单但产生 pause。异步方案先把 GPU 状态 stage 到 CPU，再后台写存储，缩短 GPU 停顿。</p>
-<p>代价是额外 CPU 内存、拷贝带宽和并发控制。训练继续修改参数时，后台必须写稳定快照，不能引用正在变化的 tensor。</p>
+<p>同步方案在保存完成前暂停训练，边界清晰但会产生停顿。异步方案先形成稳定快照并完成必要 staging，再由后台写出，缩短设备等待。</p>
+<p>如果后台直接读取继续变化的参数，得到的可能不是任一真实步骤的状态。稳定快照需要额外内存、拷贝和并发控制，多个保存任务堆积时也必须有背压。</p>
 <h2 id="保存频率怎么算">保存频率怎么算<a class="anchor" href="#保存频率怎么算" aria-label="链接到本节">#</a></h2>
-<p>checkpoint 间隔是成本权衡：</p>
-<pre><code class="language-text">期望丢失工作 ≈ checkpoint interval / 2
-</code></pre>
-<p>间隔越短，存储和 pause 越多；越长，故障重算越多。还要考虑故障率、恢复时间、作业价值和存储带宽。</p>
+<p>若故障在两个保存点之间近似均匀发生，单次失败平均丢失工作约为间隔的一半。间隔变短能减少回退，却提高正常保存开销；真实决策还要加入故障率、恢复时间与任务价值。</p>
+<p>可以先测一次保存暂停和写出持续时间，再为候选间隔估计正常成本与失败损失，最后用演练修正假设。不能只复制别处的 cron 周期。</p>
 <h2 id="推理也需要持久化吗">推理也需要持久化吗<a class="anchor" href="#推理也需要持久化吗" aria-label="链接到本节">#</a></h2>
-<p>模型权重是推理的主要持久状态，在线请求通常不靠 GPU checkpoint 恢复。长时异步任务可在应用层保存输入、已生成位置、随机状态或业务进度，但跨引擎恢复 KV cache 更复杂，未必值得。</p>
+<p>在线引擎往往通过重新加载模型恢复服务，不对每条生成维护可搬迁的 GPU 检查点。长时档案处理任务可以在应用层保存输入、已完成单元和业务结果，再在失败后重试未完成部分。</p>
+<p>若要从生成中途精确续写，还涉及历史状态、采样随机性和引擎格式，复杂度明显更高。先确认业务是否确实需要这种语义。</p>
 <h3 id="保存频率在正常开销与失败损失之间取舍">保存频率在正常开销与失败损失之间取舍<a class="anchor" href="#保存频率在正常开销与失败损失之间取舍" aria-label="链接到本节">#</a></h3>
-<p>每分钟都存可以减少故障回退，却可能让存储和 CPU staging 长期繁忙；每几小时存一次，正常更快，失败时损失更多计算。先测一次保存成本、故障频率和可接受回退，再设间隔，不照搬另一个集群的默认值。</p>
-<p>恢复到不同 world size 还要求格式描述全局 tensor 与 shard 位置。实际演练加载、恢复数据位置并做小步验证，比“文件大小正确”更能证明备份可用。</p>
+<p>设一次同步暂停 30 秒，间隔 30 分钟，粗略正常暂停比例约 1.67%；改为每 10 分钟保存则约 5%。在均匀失败假设下，单次平均回退从 15 分钟降到 5 分钟。这个教学比较没有加入后台写入和恢复耗时。</p>
+<p>最终应实际加载保存结果，核对步数、下一批数据和优化器状态，并执行几步验证。保存日志的成功消息只能证明某个保存路径返回，不能替代恢复验收。</p>
 <h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
-<ul>
-<li><code>torchtitan/components/data/</code></li>
-<li><code>torchtitan/components/checkpointer/</code></li>
-<li><code>megatron/core/dist_checkpointing/</code></li>
-<li>PyTorch Distributed Checkpoint 文档</li>
-</ul>
-<p>先看 state dict 如何声明，再看 planner、storage writer 和 reshard，不要只看最终文件名。</p>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="12-distributed-training.html"><small>上一章</small><strong>分片、重计算与并行组合</strong></a><a class="next" href="14-kubernetes-gpu.html"><small>下一章</small><strong>Kubernetes 怎样看到 GPU</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>数据与保存可从 <code>torchtitan/components/data/</code>、<code>torchtitan/components/checkpointer/</code> 追起，Megatron 的分布式状态格式在 <code>megatron/core/dist_checkpointing/</code>。结合 PyTorch Distributed Checkpoint 文档，按状态声明、规划、写入和重分片顺序阅读，确认目标版本实际支持的恢复条件。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="12-distributed-training.html"><small>上一章</small><strong>分片、重计算与并行组合</strong></a><a class="next" href="14-kubernetes-gpu.html"><small>下一章</small><strong>Kubernetes 怎样看到 GPU</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

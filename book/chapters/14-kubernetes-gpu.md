@@ -1,110 +1,92 @@
 # Kubernetes 怎样看到 GPU
 
-Kubernetes 默认认识 CPU、内存和普通设备，但不会自动发现 NVIDIA GPU。Device Plugin 在每个节点运行，向 kubelet 注册可用设备，并在 Pod 分配时返回设备、挂载和环境配置。
+节点装好了 GPU，并不意味着 Kubernetes 已经能分配它。设备需要被发现、报告为资源，并在容器启动时获得正确访问条件。资源计数与模型真正可运行之间还有多层合同。
 
-{{diagram:k8s-gpu|Device Plugin 把节点硬件转换成 Kubernetes extended resource。}}
+{{diagram:k8s-gpu|从硬件健康到节点资源，再到 Pod 绑定和容器设备暴露，四个步骤分别有不同负责者。}}
 
 ## Extended Resource
 
-Pod 常这样请求 GPU：
+一个档案批处理容器可以声明：
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu: 1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: archive-indexer
+spec:
+  restartPolicy: Never
+  containers:
+    - name: worker
+      image: registry.example.org/archive-worker:validated
+      resources:
+        limits:
+          nvidia.com/gpu: 2
 ```
 
-GPU 这类扩展资源是整数资源，通常写在 `limits`。不能像 CPU 一样请求 `0.25` 张物理 GPU。共享需要额外机制，例如 MIG、time-slicing 或 MPS，它们的隔离语义不同。
+镜像地址为教学示意，不能直接作为可拉取镜像。这里申请的是两个整数量资源，并不意味着默认允许 `0.5` 张物理卡。共享方案需要另外配置并说明隔离语义。
 
 ## Device Plugin 的职责
 
-- 发现健康 GPU 或 MIG 设备；
-- 向 kubelet 注册资源名与数量；
-- 监控设备健康变化；
-- Allocate 时返回设备节点、CDI、mount 或环境；
-- 暴露配置的共享策略。
+插件发现设备、跟踪健康状态，向 kubelet 注册资源，并在分配时提供设备可访问所需的信息。实际可通过设备节点、环境、挂载或 CDI 等机制完成，依配置和版本而异。
 
-它不负责选择哪个节点。节点选择由 scheduler 根据资源和约束完成。
+插件不替集群选择节点，也不判断模型的 KV 是否足够。它使设备成为可分配对象，应用运行条件仍由其他层共同保证。
 
 ## Scheduler 知道多少
 
-默认 scheduler 看到某节点有 8 个 `nvidia.com/gpu`，某 Pod 要 2 个。它不天然知道：
+调度器能依据节点报告的数量和 Pod 的约束选择放置位置。默认资源名本身通常不包含显存大小、模型热缓存或任意两卡之间的高速互联关系。
 
-- 两卡是否有 NVLink；
-- GPU 是哪个型号和显存；
-- 当前模型是否已在本地 cache；
-- 某卡上 KV cache 是否热；
-- 这 8 卡是否要作为一个 gang 同时给同一作业。
-
-型号可通过 node labels 和 affinity 表达，拓扑与 gang 常需要插件或专用 scheduler。
+型号和位置需求可借标签、亲和与拓扑机制表达，成组启动还需作业级调度支持。不要把 `nvidia.com/gpu: 2` 读成“自动给我最适合这个 TP 模型的一对卡”。
 
 ### 资源数字怎样一步步变成容器可访问的设备
 
-插件发现设备并向 kubelet 报告，节点状态呈现扩展资源，scheduler 据此选择节点；到容器启动阶段，Allocate 返回访问设备需要的信息。节点选择与具体设备暴露是两段工作。Pod Pending 与容器里看不到 GPU，可能发生在不同环节。
+先由节点插件报告设备，再由节点状态呈现可分配数量，调度器绑定 Pod，最后 kubelet 与运行时完成具体设备暴露。每一步都有独立失败方式。
 
-默认资源计数只回答够不够张数，不回答这两张卡是否处于最佳互联域。型号标签、亲和与拓扑机制补这些条件，模型所需 KV 容量和热缓存则还在引擎层。
+Pod 尚未绑定时检查调度事件；绑定成功但容器看不到设备时检查 Allocate、运行时和驱动库。跳过阶段区分而反复重启应用，会丢失有价值的现场。
 
 ## MIG、Time-slicing 与 MPS
 
 ### MIG
 
-把支持的 GPU 硬件切成隔离实例，拥有相对明确的计算和显存份额。适合稳定小负载，但 profile 固定，重配置有运维成本。
+支持的硬件可划出具有特定资源配置的实例。实例规格限制显存和计算份额，也影响能否承载某个模型。硬件分区带来的隔离与运维约束，需要结合设备支持及 profile 规划。
 
 ### Time-slicing
 
-多个容器轮流使用同一 GPU，提高低利用任务的共享率，但通常不提供显存隔离保证。所有参与者的显存总需求仍受物理卡限制。
+多个逻辑使用者轮流共享设备执行机会。增加可声明份额有利于低负载复用，但通常不构成独立显存容量保证，也不使物理带宽成倍增加。
 
 ### MPS
 
-允许多个 CUDA 进程更细粒度共享 GPU 执行资源，能改善并发，但隔离、兼容和故障域需要评估。
-
-不要把三者统称“虚拟 GPU”。先写出隔离、性能和故障需求。
+MPS 协调多个 CUDA 进程共享执行资源，可能改善并发效率。支持条件、限制和错误影响范围与 MIG 不同，需要使用真实应用验证，不能把三者一概称作同一种虚拟卡。
 
 ## DaemonSet 与节点准备
 
-Device Plugin 通常以 DaemonSet 运行在 GPU 节点。完整节点还需要驱动、container runtime 配置、监控 exporter 和标签发现。GPU Operator 可以自动化部分生命周期，但自动化不会消除版本兼容矩阵。
+插件通常通过 DaemonSet 覆盖 GPU 节点。节点还需要可用驱动、兼容的容器运行时和工具包、正确网络，以及必要监控。自动化 Operator 可以管理其中部分生命周期，但兼容组合仍需验证。
 
-应固定并验证：
-
-- driver 与 kernel；
-- CUDA runtime 与容器镜像；
-- Device Plugin 配置；
-- MIG 模式；
-- container toolkit；
-- NCCL 和网络插件。
+给节点准备建立版本清单，包含内核、驱动、容器 CUDA 运行库、插件配置和通信组件。升级前用代表性单卡与多卡任务做检查，而不只确认 Pod 正常。
 
 ### 共享份额不应被当成显存承诺
 
-time-slicing 可以让更多进程轮流使用设备，但它们的显存需求仍叠加在物理卡上。两个各需要 20 GiB 的任务不能因配置了两个共享槽，就自动在 24 GiB 卡上共存。调度数字与物理隔离语义必须分别理解。
+假设物理卡有 16 GiB，两份任务各需 11 GiB。即使调度层暴露两个共享槽，也没有 22 GiB 物理空间可供它们同时驻留。
 
-MIG 给出硬件分区，profile 限定容量与计算；MPS 改善进程并发，却有自身兼容与故障边界。选择先看稳定容量、隔离和运行模型需求，再看可声明多少逻辑资源。
+若需要确定的显存边界，必须选择满足条件的隔离方案，并用真实模型峰值验收。共享利用率提升与容量保证是两种不同目标。
 
 ## 一个 Pod 能用多卡，不等于多节点
 
-单 Pod 请求 8 GPU 通常使用同一节点内设备。多节点训练通常是多个 Pod，每个 Pod 若干 GPU，再通过 rendezvous 组成 world。它需要 gang scheduling、稳定网络和 rank 配置。
+单个 Pod 的设备请求由一个节点满足，不能靠申请更多 GPU 自动跨越多个节点。多节点训练通常由多个 Pod 加上 rendezvous、rank 和进程组配置组成逻辑作业。
+
+这组进程还需要网络连通、共同版本及足够的启动资源。每个 Pod 各自拿到卡，不代表整个 world 已经可以执行 collective。
 
 ## 排障顺序
 
-1. `nvidia-smi` 在节点是否正常；
-2. Device Plugin Pod 是否健康；
-3. Node allocatable 是否出现 GPU 资源；
-4. Pod request/limit 和 selector 是否正确；
-5. scheduler event 为什么 Pending；
-6. 容器内设备与 driver library 是否可见；
-7. 应用是否选择正确 local rank。
+在节点上确认设备与驱动，再查插件是否报告健康资源，随后查看 Pod 申请和调度事件。容器启动后核对设备与库可见性，最后进入应用的 local rank、初始化和通信。
 
-把“Pod Pending”和“容器内 CUDA 错误”分开，它们属于调度与运行两个阶段。
+这条路线由下层事实逐步走向应用，不会把节点故障、资源不足和模型 OOM 混成一个 CUDA 问题。保留事件和首错后再执行重启。
 
 ### 用故障所在层选择检查命令
 
-主机看不到设备先查硬件与驱动；主机正常但容器看不到，查 runtime 和设备分配；节点没呈现资源，查 plugin 注册和健康；Pod 有卡而模型挂起，再查 rank、通信和软件。不要从所有症状一律重启模型开始。
+`nvidia-smi` 用来检查主机设备，节点资源和 Pod event 用来解释分配，容器内设备与库检查解释运行时，rank 日志解释协作初始化。某层结果正常，只能排除相应问题，不能顺便证明下一层正确。
 
-多节点作业还需 rendezvous 和 group 配置，每个 Pod 得到本地 GPU 后才能共同组成 world。分配成功不是训练已就绪，健康检查应覆盖这个协作层。
+若多节点挂起，先确认全部参与者是否进入同一 rendezvous，再核对网络和 collective。无需因为最后显示通信超时，就重新安装整个设备插件。
 
 ## 源码入口
 
-- `k8s-device-plugin/cmd/nvidia-device-plugin/`
-- `k8s-device-plugin/internal/plugin/`
-- `k8s-device-plugin/internal/rm/`
-- `k8s-device-plugin/internal/mig/`
-- Kubernetes Schedule GPUs 文档
+启动注册可查 `k8s-device-plugin/cmd/nvidia-device-plugin/`，分配路径在 `k8s-device-plugin/internal/plugin/`，资源发现与 MIG 组织分别参考 `internal/rm/` 和 `internal/mig/`。结合 Kubernetes 的 Schedule GPUs 文档，把代码职责放回节点选择与容器启动的阶段中理解。

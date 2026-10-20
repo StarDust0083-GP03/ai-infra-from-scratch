@@ -1,81 +1,35 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>模型加载、精度与量化 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 08</div><div class="rail-title">模型加载、精度与量化</div><ol><li><a href="#冷启动发生了什么">冷启动发生了什么</a></li><li><a href="#权重格式">权重格式</a></li><li><a href="#量化到底减少什么">量化到底减少什么</a></li><li><a href="#为什么更小不一定更快">为什么更小不一定更快</a></li><li><a href="#精度是系统合同">精度是系统合同</a></li><li><a href="#模型加载的分布式问题">模型加载的分布式问题</a></li><li><a href="#热更新与滚动发布">热更新与滚动发布</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 08 章</div><h1>模型加载、精度与量化</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>模型能放进显存，只是部署的第一关。加载时间、权重格式、量化 kernel、硬件支持和输出质量共同决定是否可用。</p>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 08</div><div class="rail-title">模型加载、精度与量化</div><ol><li><a href="#冷启动发生了什么">冷启动发生了什么</a></li><li><a href="#权重格式">权重格式</a></li><li><a href="#量化到底减少什么">量化到底减少什么</a></li><li><a href="#为什么更小不一定更快">为什么更小不一定更快</a></li><li><a href="#精度是系统合同">精度是系统合同</a></li><li><a href="#模型加载的分布式问题">模型加载的分布式问题</a></li><li><a href="#热更新与滚动发布">热更新与滚动发布</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 08 章</div><h1>模型加载、精度与量化</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>档案问答的进程已经启动，却还不能接待读者。模型文件必须被识别、读取、转换并放到正确设备，执行路径还要完成预热。服务发布需要测量这一整段准备时间，不能只测容器启动。</p>
 <h2 id="冷启动发生了什么">冷启动发生了什么<a class="anchor" href="#冷启动发生了什么" aria-label="链接到本节">#</a></h2>
-<p>典型顺序：</p>
-<pre><code class="language-text">读取配置 -&gt; 创建模型结构 -&gt; 读取权重分片
--&gt; CPU 解码或映射 -&gt; 搬到 GPU -&gt; 转换/量化
--&gt; 分配 KV 与 workspace -&gt; 编译或捕获图 -&gt; warmup
-</code></pre>
-<p>模型文件在对象存储、网络盘、本地 SSD 和 page cache 中，冷启动时间会完全不同。第二次启动更快，可能只是操作系统 cache 命中，不代表存储设计已经解决。</p>
+<p>配置首先决定模型结构和加载方式，随后读取权重分片，建立参数映射，将内容送入设备，并准备缓存与工作区。某些运行方式还会编译 kernel、捕获图或执行预热。不同阶段可能重叠，也可能产生暂时同时存在的副本。</p>
+<p>把存储来源写入启动日志。远端对象、本地 SSD 和操作系统页缓存的表现不同；第二次启动较快可能只是缓存命中。扩容设计应包含真正冷启动，而非只复用一台已热的节点。</p>
 <h2 id="权重格式">权重格式<a class="anchor" href="#权重格式" aria-label="链接到本节">#</a></h2>
-<p>安全、可分片、支持 memory mapping 的格式更适合大模型。加载器还要处理：</p>
-<ul>
-<li>参数名到模型层的映射；</li>
-<li>tensor parallel rank 只读取自己的分片；</li>
-<li>tied weights；</li>
-<li>量化 scale 与元数据；</li>
-<li>模型架构自定义代码的信任边界。</li>
-</ul>
-<p>不要在生产环境无审查执行模型仓库的远程代码。</p>
+<p>加载器需要知道每个 tensor 属于哪个参数，哪些权重共享，以及当前 rank 应拿到哪个切片。可分片和可映射的格式有利于控制读取量，但格式支持并不保证框架采用最省内存的路径。</p>
+<p>模型仓库中的自定义代码还构成执行边界。进入生产前固定版本，核查需要运行的代码及文件来源。权重下载成功不能替代供应链检查。</p>
 <h2 id="量化到底减少什么">量化到底减少什么<a class="anchor" href="#量化到底减少什么" aria-label="链接到本节">#</a></h2>
-<p>权重量化主要减少权重存储和搬运：</p>
-<pre><code class="language-text">FP16 7B ≈ 13.04 GiB
-INT8 7B ≈ 6.52 GiB + metadata
-INT4 7B ≈ 3.26 GiB + metadata
-</code></pre>
-<p>它可能允许更大 batch 或更多 KV，也可能提高 decode 的有效带宽。但量化还会增加反量化、scale 读取和特定 kernel 要求。</p>
+<p>以 30 亿参数计算，16 位内容约 5.59 GiB，8 位约 2.79 GiB，4 位约 1.40 GiB。这些只是理想权重内容，实际还需 scale、打包信息和未量化层。</p>
+<p>若原工作受权重搬运限制，减少读取字节可能加快生成；若省下的空间用作 KV，也可能增加可服务的并发。两种收益要分别验证，不能从文件缩小直接推出速度按比例提高。</p>
 <h3 id="权重压缩以后-剩下的空间去哪里">权重压缩以后，剩下的空间去哪里<a class="anchor" href="#权重压缩以后-剩下的空间去哪里" aria-label="链接到本节">#</a></h3>
-<p>7B 权重从 16 位降到 4 位，理论从约 13.04 GiB 降到 3.26 GiB，但还需 scale、某些高精度层与运行空间。节省部分可以容纳更多 KV，也可以作为峰值余量。它并没有自动把 KV 和激活都变成 4 位。</p>
-<p>模型文件较小还可能降低读取量，但加载器可能要转换格式或生成适配 kernel。磁盘体积、设备常驻体积与启动峰值是三个数字，分别记录才能解释为什么文件已变小而启动仍然 OOM。</p>
+<p>假设从 16 位切到 8 位，理论节省约 2.79 GiB。可以将一部分留作工作峰值余量，另一部分扩大缓存池，但 KV 精度若不变，每个历史位置仍需原来的字节。</p>
+<p>加载过程中还可能先建立高精度副本再转换。因此磁盘文件尺寸、稳定驻留尺寸和转换峰值应单列测量。若只看量化文件大小，就可能在首次启动时遇到意外 OOM。</p>
 <h2 id="为什么更小不一定更快">为什么更小不一定更快<a class="anchor" href="#为什么更小不一定更快" aria-label="链接到本节">#</a></h2>
-<ul>
-<li>小 batch 下 kernel launch 与解包开销占比高；</li>
-<li>某硬件没有高效目标精度指令；</li>
-<li>算子回退到慢实现；</li>
-<li>只有部分层量化，频繁转换；</li>
-<li>prefill 原本计算受限，低精度 kernel 未充分优化；</li>
-<li>请求受排队或网络限制，权重速度不是瓶颈。</li>
-</ul>
-<p>量化必须在目标 GPU、长度和并发上 benchmark。</p>
+<p>低比特内容需要匹配的打包布局与高效 kernel，某些路径还会做反量化。若目标设备不支持高效实现，或算子回退、频繁转换，节省的读取可能被额外工作抵消。</p>
+<p>还要先确认瓶颈位置。排队或 CPU 分词主导的短请求，不会因权重读取改善而同比加速；输入阶段与生成阶段也可能对同一种量化有不同收益。</p>
 <h2 id="精度是系统合同">精度是系统合同<a class="anchor" href="#精度是系统合同" aria-label="链接到本节">#</a></h2>
-<p>训练常在 FP32、BF16、FP16、FP8 间混合。推理可进一步使用 INT8/INT4 权重和低精度 KV。每次降低精度都要回答：</p>
-<ol>
-<li>哪些 tensor 降低？</li>
-<li>在哪里累加？</li>
-<li>scale 如何产生和保存？</li>
-<li>哪些层保持高精度？</li>
-<li>质量如何评估？</li>
-<li>kernel 与硬件是否支持？</li>
-</ol>
-<p>“模型是 INT4”不够，至少要说明量化方法、group size、activation/KV 精度和运行时。</p>
+<p>一份可复现配置应说明权重表示、量化方法与分组方式、激活和 KV 精度、累加精度，以及目标 kernel 和设备支持。只写“低比特模型”无法判断它减少哪类占用。</p>
+<p>质量检查与速度检查都需基线。档案中的日期、数字、少见地名和引用可能对精度变化敏感，不能只用几个日常问候验证可用性。</p>
 <h3 id="精度合同要覆盖输入到-kernel-的整条路">精度合同要覆盖输入到 kernel 的整条路<a class="anchor" href="#精度合同要覆盖输入到-kernel-的整条路" aria-label="链接到本节">#</a></h3>
-<p>权重格式声明 INT4，运行 kernel 需要正确打包布局和 scale，累积又可能用更高精度。某一环不兼容，可能加载失败、回退慢路径或影响数值结果。仅核对文件名带 quant 不足以证明部署正确。</p>
-<p>质量验证用代表性的真实问题，性能验证用目标长度和并发；两者各自固定基线。若推理更快却使关键任务失败率上升，压缩没有获得产品净收益。</p>
+<p>例如权重按组保存 scale，加载器必须以相同分组解释内容，kernel 又需对应布局。错配可能直接报错，也可能悄悄走不同执行路径。确认配置被接受后，还要检查实际选择的实现。</p>
+<p>对代表性任务比较输出错误与异常数值，同时用相同长度和到达过程比较延迟。一个速度改善结论不能顺带证明任务质量未变。</p>
 <h2 id="模型加载的分布式问题">模型加载的分布式问题<a class="anchor" href="#模型加载的分布式问题" aria-label="链接到本节">#</a></h2>
-<p>多卡模型有两种常见方向：</p>
-<ul>
-<li>每个 rank 从存储读取自己的 shard；</li>
-<li>少量 rank 读取，再通过网络广播或 scatter。</li>
-</ul>
-<p>前者给存储带来并发读取压力，后者给节点内或节点间网络带来压力。最佳方案取决于 checkpoint 布局、文件系统和拓扑。</p>
+<p>各 rank 独立读取分片会把压力放到存储，集中读取再分发则把压力转到网络和分发者。是否值得预先切片，还取决于权重布局是否与实际 TP、PP 配置匹配。</p>
+<p>同时启动很多工作组时，本地每组的加载很快也可能形成远端读取风暴。应限制准备并发、观察存储吞吐，并把失败重试的放大量计入容量。</p>
 <h2 id="热更新与滚动发布">热更新与滚动发布<a class="anchor" href="#热更新与滚动发布" aria-label="链接到本节">#</a></h2>
-<p>大模型启动慢，不能把普通无状态 Web 服务的滚动参数原样照搬。需要考虑：</p>
-<ul>
-<li>新副本完成权重加载和 warmup 后再接流量；</li>
-<li>同时启动太多副本会打爆对象存储；</li>
-<li>旧副本要排空长生成请求；</li>
-<li>模型版本、tokenizer 与 chat template 必须一致；</li>
-<li>回滚时旧权重和镜像仍可获取。</li>
-</ul>
+<p>新版本必须完成加载、执行检查和必要预热后才进入就绪集合。旧版本停止接新请求，再为仍在生成的请求留出排空窗口。模型、tokenizer、聊天模板和 adapter 应作为一致版本组合交付。</p>
+<p>更新计划也应保留旧镜像、权重与配置。仅修改服务标签而旧文件已经删除，并不具备真正可执行的回滚路径。</p>
 <h3 id="滚动更新为什么需要额外容量">滚动更新为什么需要额外容量<a class="anchor" href="#滚动更新为什么需要额外容量" aria-label="链接到本节">#</a></h3>
-<p>旧副本仍在处理长生成，新副本同时下载、加载和预热，切换期会占用两套资源。readiness 不应仅表示端口打开，要确认模型、KV 和必要 warmup 已准备。否则流量切过去，首批用户承担全部冷启动。</p>
-<p>对多 rank 模型还需整组版本一致，不能让半组旧权重与半组新权重共同执行。版本、精度、adapter 和索引缓存一起切换，并保留已验证的回退路径。</p>
+<p>两个旧副本各自占卡，新副本预热时还需要自己的设备。如果没有额外容量，就必须接受分批减少在线能力或预先调整发布方案。<code>maxSurge</code> 之类参数不会凭空生成 GPU。</p>
+<p>多 rank 副本要整组准备和切换。不能把一组中的部分 rank 升级后，仍让它们共同处理请求；版本一致性必须覆盖组内所有参与者。</p>
 <h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
-<ul>
-<li><code>vllm/model_executor/model_loader/</code></li>
-<li><code>vllm/model_executor/layers/quantization/</code></li>
-<li><code>torchtitan/quantization/</code></li>
-<li><code>torchtitan/models/</code></li>
-</ul>
-<p>先从配置如何选择 loader 和 quantization method 开始，不要直接扎进 kernel。</p>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="07-continuous-batching.html"><small>上一章</small><strong>连续批处理：GPU 如何同时服务很多人</strong></a><a class="next" href="09-parallelism.html"><small>下一章</small><strong>多卡不是一个开关</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>从 <code>vllm/model_executor/model_loader/</code> 检查配置怎样选择读取与映射路径，再到 <code>vllm/model_executor/layers/quantization/</code> 核对量化表示与执行条件。训练相关可查 <code>torchtitan/quantization/</code> 及 <code>torchtitan/models/</code>。先找实际被选中的实现，再阅读底层细节，避免分析一条根本没启用的优化路径。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="07-continuous-batching.html"><small>上一章</small><strong>连续批处理：GPU 如何同时服务很多人</strong></a><a class="next" href="09-parallelism.html"><small>下一章</small><strong>多卡不是一个开关</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

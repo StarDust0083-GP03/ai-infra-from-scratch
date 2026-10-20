@@ -1,69 +1,41 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>批作业调度：为什么要一起开跑 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 15</div><div class="rail-title">批作业调度：为什么要一起开跑</div><ol><li><a href="#普通逐-pod-调度的问题">普通逐 Pod 调度的问题</a></li><li><a href="#gang-scheduling">Gang Scheduling</a></li><li><a href="#volcano-的基本对象">Volcano 的基本对象</a></li><li><a href="#队列-公平与利用率">队列、公平与利用率</a></li><li><a href="#backfill">Backfill</a></li><li><a href="#抢占不是-kill-9-就结束">抢占不是 kill -9 就结束</a></li><li><a href="#拓扑约束">拓扑约束</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 15 章</div><h1>批作业调度：为什么要一起开跑</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>一个 32 GPU 训练作业常由 4 个 Pod 组成，每个 Pod 要 8 GPU。如果只启动其中 3 个，进程会等待第 4 个 rank，已经占用的 24 GPU 也做不了有效训练。这就是 gang scheduling 要解决的问题。</p>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 15</div><div class="rail-title">批作业调度：为什么要一起开跑</div><ol><li><a href="#普通逐-pod-调度的问题">普通逐 Pod 调度的问题</a></li><li><a href="#gang-scheduling">Gang Scheduling</a></li><li><a href="#volcano-的基本对象">Volcano 的基本对象</a></li><li><a href="#队列-公平与利用率">队列、公平与利用率</a></li><li><a href="#backfill">Backfill</a></li><li><a href="#抢占不是-kill-9-就结束">抢占不是 kill -9 就结束</a></li><li><a href="#拓扑约束">拓扑约束</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 15 章</div><h1>批作业调度：为什么要一起开跑</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>夜间训练需要多个进程协作。如果只给其中部分进程设备，它们可能一直等待其他成员，已经分到的卡却无法交付任何训练结果。作业级准入要避免这种半组占用。</p>
 <h2 id="普通逐-pod-调度的问题">普通逐 Pod 调度的问题<a class="anchor" href="#普通逐-pod-调度的问题" aria-label="链接到本节">#</a></h2>
-<p>假设集群有两个各需要 4 个 Pod 的作业，当前只有 6 个空槽。普通 scheduler 可能各放 3 个：</p>
-<pre><code class="language-text">Job A: 3 / 4 已启动，等待
-Job B: 3 / 4 已启动，等待
-空槽: 0
-</code></pre>
-<p>两个作业都无法开始，却占满资源。批调度器需要以 PodGroup 或 Job 为整体判断是否满足最小成员数。</p>
+<p>考虑两个作业，各要求三个协作 Pod，而当前只能容纳四个。若各启动两个，就出现两组都缺最后成员、却没有剩余槽位的状态。单个 Pod 看起来分配成功，作业整体没有前进。</p>
+<p>平台需要根据真实协作下界判断是否准入，再安排成员，而非仅优化每个独立 Pod 的放置成功率。</p>
 <h2 id="gang-scheduling">Gang Scheduling<a class="anchor" href="#gang-scheduling" aria-label="链接到本节">#</a></h2>
-<p>只有能同时满足 <code>minMember</code> 或资源下界时才让作业进入运行，否则先排队。这避免半启动死锁，但会产生资源碎片与等待，需要队列和 backfill 策略配合。</p>
+<p>gang 策略将最小成员或资源需求作为启动条件。不满足时等待，满足时让必要成员获得资源。这能减少无效半启动，却可能为大组保留资源并产生暂时空闲。</p>
+<p>准入条件应来自运行时合同，例如必须同时存在的训练 worker 数，而不是把日志收集或辅助容器也机械计入计算门槛。</p>
 <h3 id="一起获得资源-不等于同一瞬间开始计算">一起获得资源，不等于同一瞬间开始计算<a class="anchor" href="#一起获得资源-不等于同一瞬间开始计算" aria-label="链接到本节">#</a></h3>
-<p>Gang 调度为作业满足协作资源下界，防止半组长期占卡；Pod 之后仍要拉镜像、准备数据和 rendezvous。某个成员启动慢，其余 rank 依旧等待。调度准入解决资源协作，训练 runtime 解决进程协作，两个阶段应分别观测。</p>
-<p>minMember 也应符合真实角色：某些辅助任务不必和训练 worker 同时计算，不能机械把全部 Pod 数当作门槛。模板先定义哪些成员是开跑必要条件。</p>
+<p>资源满足后，成员仍要拉取镜像、加载模型、读取数据和加入 rendezvous。某一个准备缓慢，其他 rank 仍会等它。作业监控应拆开“等待准入”和“已准入但等待协作”。</p>
+<p>若一个辅助服务失败就应阻止开跑，也需显式写入启动条件。调度数量正确不能替代业务就绪检查。</p>
 <h2 id="volcano-的基本对象">Volcano 的基本对象<a class="anchor" href="#volcano-的基本对象" aria-label="链接到本节">#</a></h2>
-<ul>
-<li>Job：批作业生命周期和任务角色；</li>
-<li>PodGroup：一组需要协同调度的 Pod；</li>
-<li>Queue：组织配额、权重和优先级；</li>
-<li>Scheduler plugins：gang、priority、DRF、binpack 等策略；</li>
-<li>Controllers：把 Job 期望状态调和成 Pod 与 PodGroup。</li>
-</ul>
-<p>Volcano 不替代训练框架。它决定何时、在哪里给 Pod 资源，TorchTitan/Megatron 仍负责 rank 内计算与通信。</p>
+<p>Job 描述任务角色与生命周期，PodGroup 描述需要协同的成员，Queue 表达资源组织和策略范围，调度插件实现 gang、公平、优先级或装箱等规则，控制器负责把期望转换成实际对象。</p>
+<p>这些对象管理资源进入条件，不执行模型梯度或 collective。运行时与批调度器之间要约定故障、重启和保存信号。</p>
 <h2 id="队列-公平与利用率">队列、公平与利用率<a class="anchor" href="#队列-公平与利用率" aria-label="链接到本节">#</a></h2>
 <h3 id="fifo">FIFO<a class="anchor" href="#fifo" aria-label="链接到本节">#</a></h3>
-<p>容易理解，但一个超大作业可能阻塞后面能立即运行的小作业。</p>
+<p>按顺序容易让用户理解等待，但队首大作业可能暂时无法运行，后面较小的作业也被挡住。若采用绕过规则，应把它说明为策略，而非暗中改变顺序。</p>
 <h3 id="priority">Priority<a class="anchor" href="#priority" aria-label="链接到本节">#</a></h3>
-<p>高优作业先运行，需定义是否允许抢占以及被抢占作业如何恢复。</p>
+<p>优先级可支持紧急校对任务，但需定义是否允许抢占、最长等待和普通任务的保障。否则高优任务持续到来时，低优队列可能长期没有进展。</p>
 <h3 id="drf">DRF<a class="anchor" href="#drf" aria-label="链接到本节">#</a></h3>
-<p>Dominant Resource Fairness 根据用户最稀缺资源份额协调多资源公平。GPU 集群还可能区分型号和拓扑，单一计数并不够。</p>
+<p>主导资源公平用于协调多资源份额，不能简单等同于平均 GPU 张数。不同卡型、显存和网络拓扑会使同一数量具有不同可用能力，资源分类仍需平台定义。</p>
 <h3 id="binpack">Binpack<a class="anchor" href="#binpack" aria-label="链接到本节">#</a></h3>
-<p>尽量把任务塞紧，空出完整节点给大 gang。它提高可调度性，但热点、功耗和故障域集中也要考虑。</p>
+<p>将兼容任务尽量集中，可以留下完整节点或互联域给大作业。集中也可能带来电力、温度或故障域风险，因此应把设备可用性与基础设施约束一起考虑。</p>
 <h2 id="backfill">Backfill<a class="anchor" href="#backfill" aria-label="链接到本节">#</a></h2>
-<p>大作业等待完整资源时，可让预计较短的小作业临时填空，但必须确保不会延误已承诺的大作业。需要运行时估计或最大时长合同，AI 训练时长往往不准，因此策略要保守。</p>
+<p>大作业等待资源窗口时，可以让能在窗口前退出的小作业暂时利用空闲容量。前提是时长估计可信，或任务具有可接受的抢占和恢复合同。</p>
+<p>训练时长受数据、保存和故障影响，用户填写“几分钟”并不是保证。可以使用明确最大运行时，超出时按约定退出，而非让临时任务无限拖延已承诺的大作业。</p>
 <h3 id="公平-碎片和等待为什么不能同时简单最大化">公平、碎片和等待为什么不能同时简单最大化<a class="anchor" href="#公平-碎片和等待为什么不能同时简单最大化" aria-label="链接到本节">#</a></h3>
-<p>让小作业先跑，可能提高即时利用率，却推迟需要完整节点的大作业；为大作业保留槽位，又可能出现暂时空闲。Binpack 尝试留下整节点，DRF 关注资源份额，目标不同。空闲 GPU 不必然证明调度器无效，还要看将来承诺与拓扑要求。</p>
-<p>Backfill 依赖时长估计。小任务超出预计，就可能侵占大作业开始窗口，因此需要最大运行时或可抢占合同。不能只按用户自报“很快”判断。</p>
+<p>立刻填满所有空卡有利于短期利用率，却可能一直凑不齐大组。为大组保留资源会产生眼前空闲，却可能缩短它的整体等待。评估策略要同时看用户等待、有效计算与拓扑碎片。</p>
+<p>公平份额和紧急优先级也可能冲突。平台应公开它选择保护的目标，并用真实或可重放作业序列检查长期饥饿。</p>
 <h2 id="抢占不是-kill-9-就结束">抢占不是 kill -9 就结束<a class="anchor" href="#抢占不是-kill-9-就结束" aria-label="链接到本节">#</a></h2>
-<p>抢占前应给训练任务时间保存 checkpoint。需要协调：</p>
-<ol>
-<li>scheduler 发出终止或驱逐；</li>
-<li>作业捕获信号并停止接收新 step；</li>
-<li>完成一致 checkpoint；</li>
-<li>Pod 退出释放 GPU；</li>
-<li>重新调度后从 checkpoint 恢复。</li>
-</ol>
-<p>宽限期太短会丢进度，太长会拖慢高优作业。</p>
+<p>可恢复抢占需要一条完整协议：发出终止通知，停止开始新步骤，在规定时间内完成一致保存，退出并释放资源，后续再选择可用状态恢复。宽限期与保存能力不匹配时，会损失未提交进度。</p>
+<p>平台要定义超时后怎样处理，也要避免同时驱逐过多作业形成 checkpoint 写入风暴。抢占延迟应包括保存与设备真正释放，而非只记录信号发送。</p>
 <h2 id="拓扑约束">拓扑约束<a class="anchor" href="#拓扑约束" aria-label="链接到本节">#</a></h2>
-<p>多卡作业除了数量，还可能要求：</p>
-<ul>
-<li>同一节点或同一 NVSwitch 域；</li>
-<li>节点靠近同一网络 leaf；</li>
-<li>GPU 型号一致；</li>
-<li>本地 NVMe cache 已有数据；</li>
-<li>避开同一故障域或维护节点。</li>
-</ul>
-<p>约束越多，调度越难。平台应提供少量经过验证的资源模板，不让每个用户手写复杂 affinity。</p>
+<p>协作组可能要求同一高速域、相同设备规格或特定网络亲和。数据本地性与故障域也会影响选择。每增加一种约束，调度可行空间都会缩小。</p>
+<p>向用户提供经过验证的少量模板通常比任意 affinity 组合更可靠。模板中同时固定镜像、通信配置和恢复方式，防止资源看似满足却无法运行。</p>
 <h3 id="抢占回收的是资源-损失的是已做计算">抢占回收的是资源，损失的是已做计算<a class="anchor" href="#抢占回收的是资源-损失的是已做计算" aria-label="链接到本节">#</a></h3>
-<p>宽限期应容纳一致 checkpoint，但高优作业也不能无限等待。平台先定义信号、保存时限和未完成处理，再测试训练框架是否响应。只发送终止信号不保证 optimizer、数据位置和模型状态已经落盘。</p>
-<p>重新调度时沿用最近完整 checkpoint，并记录损失步骤与原因。这样才能比较优先级政策的真实成本，而非只统计资源多久被释放。</p>
+<p>假设最新可用保存点之后已训练 12 分钟，此时强制退出会丢掉这段工作。若愿意等 40 秒完成新保存，可以减少重算，但紧急任务也多等这 40 秒。两种成本都应记录。</p>
+<p>真正恢复后核对选择了哪份 checkpoint、损失多少步及数据位置。只统计“几秒释放 GPU”会隐藏被抢占方的计算损失。</p>
 <h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
-<ul>
-<li><code>volcano/pkg/scheduler/</code></li>
-<li><code>volcano/pkg/scheduler/plugins/gang/</code></li>
-<li><code>volcano/pkg/controllers/job/</code></li>
-<li><code>volcano/pkg/controllers/podgroup/</code></li>
-<li>Volcano architecture 与 plugin 文档</li>
-</ul>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="14-kubernetes-gpu.html"><small>上一章</small><strong>Kubernetes 怎样看到 GPU</strong></a><a class="next" href="16-serving-cluster.html"><small>下一章</small><strong>在线服务：网关、队列、副本与扩缩容</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>从 <code>volcano/pkg/scheduler/</code> 追作业与队列决策，gang 条件可进入 <code>volcano/pkg/scheduler/plugins/gang/</code>。实际 Job 与 PodGroup 的生命周期分别查 <code>volcano/pkg/controllers/job/</code> 和 <code>volcano/pkg/controllers/podgroup/</code>，结合架构与插件文档核对当前快照的策略配置。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="14-kubernetes-gpu.html"><small>上一章</small><strong>Kubernetes 怎样看到 GPU</strong></a><a class="next" href="16-serving-cluster.html"><small>下一章</small><strong>在线服务：网关、队列、副本与扩缩容</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

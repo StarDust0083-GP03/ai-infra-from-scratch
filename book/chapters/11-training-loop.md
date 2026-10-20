@@ -1,102 +1,82 @@
 # 训练循环与训练显存
 
-训练基础循环只有四步：取数据、forward、backward、optimizer step。大模型训练系统的复杂性来自每一步都可能跨多卡，并且状态大到不能完整复制。
+夜间校对任务用人工修订的档案片段训练模型。一次参数更新要经过取样、前向计算、反向求导和优化器更新。把这些动作的边界画清楚，才能区分数据等待、激活峰值和状态占用。
 
-```python
-for batch in dataloader:
-    optimizer.zero_grad()
-    loss = model(batch)
-    loss.backward()
-    optimizer.step()
+下面是说明累积顺序的伪代码，不是可直接运行的训练器：
+
+```text
+清空本轮梯度
+重复 K 次：取 micro-batch，计算并缩放 loss，累积梯度
+按分布式策略完成需要的梯度同步
+检查数值状态，执行一次参数更新
 ```
 
 ## Forward
 
-输入 token 经过 embedding 和每层 Transformer，得到 logits 与 loss。为 backward 计算梯度，框架通常保留部分中间激活。
+模型将输入位置转换为预测分布，并根据目标计算 loss。自动微分需要某些中间结果，因此 forward 结束后并非只留下一个 loss 数值。哪些结果保存、哪些可重算，决定后续激活内存。
+
+样本掩码、padding 和目标移动也影响训练语义。一个更快但读错目标的 forward 不能算性能优化。
 
 ## Backward
 
-自动微分按计算图反向计算参数梯度。Backward 不是 forward 的简单倒放，它可能需要读取保存激活、重算 checkpointed 区域，并在数据并行 rank 间同步梯度。
+自动微分沿依赖关系计算梯度，读取保存结果或重新计算部分区域。分布式方案还可能在梯度就绪后逐批启动同步，而非等全部反向结束才开始通信。
+
+观察到反向阶段很长时，要区分本地求导、重计算和同步等待。不同原因对应不同动作，不能全部归到“反向约为前向两倍”的粗略经验。
 
 ## Optimizer Step
 
-AdamW 读取权重、梯度和两个 moment，更新参数。优化器状态体积大，且是训练 checkpoint 的主要组成部分之一。
+以 AdamW 为例，更新需要参数、梯度及 moment，还可能有高精度主参数。更新边界通常也推动学习率计划和步数计数。若数值异常导致跳过更新，要明确这些计数怎样处理。
+
+只保存模型权重可以用于某些推理场景，却不足以在同一优化状态继续训练。恢复需要的内容将在数据与检查点章节展开。
 
 ## Micro-batch、Global batch 与累积
 
-```text
-global batch
-= micro batch per GPU × data parallel degree × accumulation steps
-```
+简单同步数据并行下，一次更新的样本数等于每数据副本的 micro-batch 乘数据并行度，再乘累积次数。TP 或 PP 参与者共同处理同一份模型工作，不应再次乘入独立样本数。
 
-梯度累积让每卡用较小 micro-batch 多跑几次 forward/backward，再做 optimizer step。它降低单次激活峰值，但增加每个 step 的串行 micro-step 数。
-
-必须记录 batch 的口径，否则学习率和吞吐都无法比较。
+累积允许每次前向使用较小输入，从而减少单次激活峰值。梯度要跨 micro-step 保留，loss 缩放和同步时机也要匹配，否则可能改变有效更新。
 
 ### 一次 optimizer step 究竟看过多少样本
 
-每个 DP rank 的 micro-batch 为 2，DP 度为 8，累积 4 次后更新，则 global batch 为 64。TP 或 PP rank 协同处理同一份模型工作，不能再把它们当作额外独立样本乘进去。比较吞吐和学习率时，必须使用相同 batch 口径。
+设每个数据副本一次处理 3 份校对样本，共 4 个副本，累积 5 次，则更新前共处理 60 份样本。若每份恰好含 1024 个有效位置，对应 61,440 个有效 token。
 
-累积降低单次激活峰值，但梯度要在更新前正确累计，loss 缩放与同步策略也要匹配。不能简单重复四次普通循环而每次都清梯度并 step，那会成为四次不同的优化器更新。
+每个 micro-step 都清梯度并更新，会变成五次不同更新，不再等价于这个 global batch。实际变长数据还应按有效 token 而非固定样本长度复核。
 
 ## 训练显存四大项
 
-1. 模型参数；
-2. 梯度；
-3. 优化器状态；
-4. 激活。
+参数决定模型当前值，梯度记录本轮更新方向，优化器状态记录更新历史，激活支持本轮求导。前几项大体跟参数量相关，激活更直接依赖 micro-batch、序列形状及实现。
 
-前 3 项主要随参数量增长，激活主要随 micro-batch、序列长度、层和实现增长。FSDP/ZeRO 主要分片前 3 项，activation checkpointing 主要减少第 4 项。
+长期状态主导时考虑分片，激活主导时考虑缩小输入或重算。最好通过测量和对象清点确认主项，而不是根据模型标签预判。
 
 ## Activation Checkpointing
 
-普通做法保存中间激活，用空间换 backward 速度。Checkpointing 只保存选定边界，backward 时重新 forward 该段。
+选择边界保存少量结果，其余中间状态在反向需要时重新计算。它以额外运算换取更小保存集合，边界和分组粒度决定收益及成本。
 
-```text
-少存激活 -> 显存下降
-重新计算 -> step 时间上升
-```
-
-选择粒度太粗，重算多；太细，边界和调度开销增加。应按层或算子成本 profile。
+采用后需比较峰值与完整 step 时间，还要确认随机性和数值路径按框架要求处理。某些区域计算昂贵却节省有限，不适合一概开启最大力度重算。
 
 ### 重计算省下的是激活，而不是所有训练状态
 
-forward 保存每层中间结果方便 backward，但占显存；checkpointing 只留边界，反向需要时重新算该段。参数、梯度与 optimizer moments 仍存在，所以状态主导的 OOM 不会只靠重算消失。
+若本轮激活峰值为 8 GiB，而参数、梯度和优化器状态共 40 GiB，即使去掉大部分激活，40 GiB 仍然存在。这个教学账解释了为什么重算不能修复所有训练 OOM。
 
-选择区域时看保存字节与重算成本。很便宜又很占空间的中间结果适合重算，昂贵区域则可能拖慢 step。随机操作与实现细节也需正确处理，数值训练不能只验证程序没报错。
+应优先分析占用大、重新生成成本相对低的中间结果。重算区域扩大后，还需复查数据供给和通信重叠是否改变了关键路径。
 
 ## Mixed Precision
 
-模型计算可用 BF16/FP16/FP8，部分归约和优化器状态保留更高精度。混合精度的目标不是“所有 tensor 都变小”，而是在数值稳定、硬件吞吐和显存间取平衡。
+计算、累加、梯度和优化器可以采用不同精度。FP16 可能需要 loss scaling，BF16 具有不同指数范围和尾数精度，FP8 又依赖硬件及缩放方案。没有一条“全部转低精度”的规则适用于所有训练。
 
-FP16 训练常需要 loss scaling 防止小梯度下溢。BF16 指数范围更大，但尾数精度较低。具体策略由模型、硬件和框架决定。
+记录溢出、跳步、梯度范数和 loss，检查速度变化是否伴随训练不稳定。字节数下降只是其中一项结果。
 
 ## TorchTitan 的训练骨架
 
-当前源码把职责拆为：
+先从 `train.py` 及训练引擎追一步运行，再按职责进入 `components/data`、优化器组件、`distributed`、`components/checkpointer` 和可观测相关模块。目录组织属于版本事实，具体调用应以本地快照为准。
 
-- `train.py` / training engine：驱动 step；
-- `components/data`：数据源与 dataloader；
-- `components/optimizer`：优化器与 scheduler；
-- `distributed`：并行维度和 mesh；
-- `components/checkpointer`：保存恢复；
-- `observability`：日志、metrics、profiling。
-
-阅读时先画每 step 时间线，再进入并行模块。
+用一张步骤表记录何时取数、何时同步、何时更新及保存，比按目录逐文件通读更容易保留整体执行关系。
 
 ### step 变快，还要确认每步工作没有变少
 
-缩短序列或减少 global batch 会降低 step 时间，但改变了处理的数据量。tokens/s、有效样本数和 loss 曲线一起比较，才能判断优化是否保留训练语义。混合精度也要观察数值异常，速度提升不应以模型无法收敛为代价。
+把有效长度从 2048 减到 1024 会让步骤变短，但也可能把处理量减半。比较时保留 global batch、有效 token 数与训练目标，报告 tokens/s 和质量曲线，而不是仅展示 step 毫秒数。
 
-GPU 空隙可能来自 dataloader、通信或 checkpoint。将一次 step 拆成取数、前向、反向、更新和保存，再找最长等待段，比先替换某个 kernel 更容易解释结果。
+保存间隔变化也会影响平均吞吐。只截取两次 checkpoint 之间最平稳的区间，不能代表完整作业成本。
 
 ## 训练吞吐看什么
 
-- samples/s 或 tokens/s；
-- model FLOPs utilization，但要统一计算口径；
-- step time 及 data/forward/backward/optimizer/communication 分解；
-- straggler rank；
-- checkpoint pause；
-- loss 和梯度健康度。
-
-只追求 GPU 利用率可能把数据错误、数值发散和 checkpoint 失败藏起来。
+一起记录有效 token 或样本速率、step 分解、各 rank 的尾部耗时、保存暂停和数值健康。若报告 MFU，说明运算量估算口径。吞吐数字必须能解释实际处理量，并能覆盖失败、保存和恢复的正常运维成本。

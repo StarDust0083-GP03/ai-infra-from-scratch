@@ -1,127 +1,105 @@
 # 附录 A：术语、公式与命令速查
 
-这页用于回查正文里的账本与数据关系。记住 AllGather 的名字，还要能指出各 rank 原有什么、操作后拿到什么；记住 KV 公式，还要知道它只覆盖缓存，而非全部推理显存。公式的每个乘数都是一个实际维度，不能脱离模型结构套用。
-
-命令输出也按层解读：设备可见不代表模型已加载，Pod Running 不代表 rank group 就绪。回到具体请求或训练 step，沿数据和等待路径定位，速查才会成为理解的辅助。
+遇到陌生缩写时，先确定它描述对象、执行阶段还是资源关系。下面的速查将名称与可观察内容配对，公式同时注明适用边界，便于回到正文复算。
 
 ## 基础术语
 
-| 术语 | 一句话解释 |
+| 名称 | 在运行中找什么 |
 | --- | --- |
-| Token | 模型处理文本的离散 ID 单元 |
-| Tensor | 带 shape 和 dtype 的多维数字数组 |
-| Parameter | 训练得到并长期保存的模型 tensor |
-| Activation | forward 中产生、供后续层或 backward 使用的中间结果 |
-| Gradient | loss 对参数的导数 |
-| Optimizer state | Adam moment 等用于更新参数的状态 |
-| HBM | GPU 高带宽显存 |
-| Kernel | 在 GPU 上执行的计算程序 |
-| Stream | CUDA 异步操作的有序队列 |
-| Rank | 分布式进程的编号 |
-| World size | 一次分布式作业中的 rank 总数 |
-| Collective | 多个 rank 共同参与的通信操作 |
+| Token | tokenizer 产生的离散位置及 ID，不按字数替代 |
+| Tensor | 形状、元素类型和当前存放位置 |
+| Parameter | 随训练更新、被保存为模型的一组数 |
+| Activation | 当前前向产生、后续计算可能还需使用的内容 |
+| Gradient | 参数更新前积累的导数贡献 |
+| Optimizer state | moment 等跨步骤延续的更新历史 |
+| HBM | 设备的大容量高带宽存储层 |
+| Kernel | 一次提交到设备的计算程序 |
+| Stream | 按依赖和顺序执行异步工作的队列 |
+| Rank / World size | 参与者标识与组内参与总数 |
+| Collective | 组内必须匹配参与的数据交换操作 |
 
 ## 推理术语
 
-| 术语 | 一句话解释 |
-| --- | --- |
-| Prefill | 处理 prompt 并建立 KV cache |
-| Decode | 逐轮生成后续 token |
-| KV Cache | 保存历史 key/value，避免重复计算 |
-| PagedAttention | 用固定 block 管理逻辑连续 KV |
-| Continuous batching | 每轮动态移出完成请求、接纳新请求 |
-| TTFT | 请求到第一个输出 token 的时间 |
-| TPOT | 平均每个输出 token 的时间 |
-| ITL | 相邻输出 token 的延迟 |
-| Prefix cache | 复用完全匹配前缀的 KV block |
-| Preemption | KV 压力或优先级导致序列暂停/重算 |
+Prefill 处理已知输入并建立历史，decode 使用历史逐步续写。KV cache 保留各层历史 key/value，分页将其逻辑位置映射到物理块；连续批处理则在轮次间改变被执行的请求集合。这几个术语分别描述计算、状态、分配和调度，不宜互相替代。
+
+TTFT 关注开始输出之前，ITL 关注相邻输出间隔，TPOT 描述生成阶段的平均口径。前缀命中省去部分已知输入计算；抢占则可能暂时释放资源并在之后重复计算。两者对延迟的影响方向不同。
 
 ## 并行术语
 
-| 缩写 | 切分方向 | 主要通信 |
+| 方式 | 工作归属变化 | 需要检查的代价 |
 | --- | --- | --- |
-| DP | batch / 请求 | 训练常 AllReduce 梯度 |
-| TP | 单层 tensor | 每层 AllReduce/AllGather 等 |
-| PP | 模型层 | stage 间激活 |
-| CP | 序列 | attention 所需跨卡数据 |
-| EP | MoE expert | AllToAll token 路由 |
-| FSDP | 参数、梯度、优化器 | AllGather + ReduceScatter |
+| DP | 不同副本拿不同数据或请求 | 训练梯度一致性与副本容量 |
+| TP | 一层内的矩阵被拆开 | 层内频繁交换和小矩阵效率 |
+| PP | 不同 stage 负责不同层 | 激活交接、失衡与起止空泡 |
+| CP | 序列位置分给参与者 | 注意力跨位置所需交换 |
+| EP | 专家分布在不同设备 | token 分发及专家热点 |
+| FSDP | 训练状态分片驻留 | 按需组装、梯度归约与保存格式 |
 
 ## 显存公式
 
 ### 权重
 
-```text
-weight bytes ≈ parameters × bits_per_weight / 8
-```
+`参数个数 × 每参数位数 ÷ 8` 给内容字节下界。例如 30 亿参数、8 位约为 2.79 GiB，未包含尺度、对齐与未量化部分。
 
 ### KV Cache
 
-```text
-KV bytes
-≈ 2 × layers × kv_heads × head_dim
-  × active_tokens × bytes_per_element
-```
+常规同配置全注意力模型可用 `2 × L × Hkv × D × 元素字节 × 保留位置数`。本书的 24 层、4 个 KV head、96 维、2 bytes 得每位置 36 KiB。分页容量、共享与混合架构须另算。
 
 ### 常见混合精度 Adam 教学估算
 
-```text
-training state ≈ parameters × 16 bytes
-```
-
-这项不含激活、通信 buffer、临时 tensor 和 allocator 余量，具体实现必须实测。
+一种示意配置为每参数 `2 + 2 + 4 + 8 = 16 bytes`，分别对应低精度参数、梯度、主参数与两份 moment。30 亿参数约 44.70 GiB，不含激活和临时空间；实际以状态 tensor 为准。
 
 ### Global batch
 
-```text
-global batch
-= micro batch per GPU × data parallel degree × accumulation steps
-```
+在简单同步 DP 条件下，`每数据副本 micro-batch × DP 度 × 累积次数`。3 份样本、4 个副本、5 次累积得到 60 份。TP、PP 不额外贡献独立样本。
 
 ### Little's Law
 
-```text
-average in-flight requests = arrival rate × average time in system
-L = λW
-```
+`L = λW` 要求平均边界一致，并在适当稳定条件下使用。每秒 6 条进入、平均停留 3 秒，对应平均在内 18 条，不是 p99 或设备需求保证。
 
 ## 常用检查
 
 ### GPU 与拓扑
 
 ```bash
-nvidia-smi
+nvidia-smi --query-gpu=uuid,name,memory.total,memory.used --format=csv
 nvidia-smi topo -m
-nvidia-smi -q
 ```
+
+前一条确认设备及容量口径，后一条查看邻近关系；两者均不能证明目标模型已通过性能测试。
 
 ### Kubernetes
 
 ```bash
-kubectl describe node <node>
+kubectl get nodes -o wide
+kubectl describe node GPU_NODE
 kubectl get pods -A -o wide
-kubectl describe pod <pod>
-kubectl get events --sort-by=.lastTimestamp
+kubectl describe pod ARCHIVE_POD
 ```
+
+将大写名称替换成实际对象。先看资源与事件，再看容器运行和应用初始化，避免混淆 Pending 与已启动后的设备错误。
 
 ### 本书离线实验
 
 ```bash
-python3 examples/infra_lab.py memory
+python3 examples/infra_lab.py memory --parameters 3 --context 6144
 python3 examples/infra_lab.py simulate
+python3 examples/infra_lab.py check
 ```
+
+最后一条运行公式、分页、调度和无进展条件的离线断言，不会调用 GPU 或云服务。
 
 ## 症状速查
 
-| 症状 | 先查什么 |
+| 观测 | 下一份应采集的证据 |
 | --- | --- |
-| 加载时 OOM | 权重精度、分片、runtime 余量 |
-| 运行一段时间 OOM | KV 增长、请求释放、allocator 峰值 |
-| TTFT 高 | 网关/引擎排队、prompt 长度、prefill |
-| TPOT 高 | decode batch、权重带宽、TP 通信 |
-| GPU 利用率低 | CPU tokenizer、数据、同步、queue |
-| 多卡比单卡慢 | 消息大小、拓扑、collective、每卡工作量 |
-| 训练卡在 NCCL | 其他 rank 首错、调用顺序、网络 |
-| Pod 一直 Pending | GPU allocatable、队列、affinity、gang |
-| 冷启动很慢 | 权重存储、并发下载、load、compile、warmup |
-| checkpoint 无法恢复 | 完成标记、版本、world size、reshard、数据状态 |
+| 加载阶段申请失败 | 权重转换生命周期与同时存活副本 |
+| 长输入后申请失败 | 已缓存长度、块池及工作区峰值 |
+| 首字等待增加 | 分词、引擎等待与输入执行的分段 |
+| 续写不平滑 | 单请求 ITL、抢占与必要通信 |
+| 卡空闲但作业未完成 | 数据就绪队列与 rank 前置依赖 |
+| 跨卡后吞吐降低 | 实际拓扑、消息粒度和 stage 时间 |
+| 通信超时 | 全部参与者的首错与调用顺序 |
+| 作业没有准入 | 可用完整组、队列份额与拓扑约束 |
+| 副本准备缓慢 | 下载、加载、编译和预热各阶段 |
+| 无法继续训练 | 已提交状态、配置兼容与数据游标 |

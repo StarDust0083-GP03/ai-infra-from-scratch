@@ -1,96 +1,45 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>端到端：设计一个小型 AI 平台 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 19</div><div class="rail-title">端到端：设计一个小型 AI 平台</div><ol><li><a href="#第一步-定义负载">第一步：定义负载</a></li><li><a href="#第二步-节点层">第二步：节点层</a></li><li><a href="#第三步-训练队列">第三步：训练队列</a></li><li><a href="#第四步-推理服务">第四步：推理服务</a></li><li><a href="#第五步-扩缩容">第五步：扩缩容</a></li><li><a href="#第六步-可观测与成本">第六步：可观测与成本</a></li><li><a href="#用本地实验室算第一版容量">用本地实验室算第一版容量</a></li><li><a href="#上线顺序">上线顺序</a></li><li><a href="#最终架构原则">最终架构原则</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 19 章</div><h1>端到端：设计一个小型 AI 平台</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>假设团队有 8 台服务器，每台 8 张同型号 GPU，需要支持内部训练作业和一个在线聊天模型。不要一开始就搭建所有组件，先写工作负载合同。</p>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 19</div><div class="rail-title">端到端：设计一个小型 AI 平台</div><ol><li><a href="#第一步-定义负载">第一步：定义负载</a></li><li><a href="#第二步-节点层">第二步：节点层</a></li><li><a href="#第三步-训练队列">第三步：训练队列</a></li><li><a href="#第四步-推理服务">第四步：推理服务</a></li><li><a href="#第五步-扩缩容">第五步：扩缩容</a></li><li><a href="#第六步-可观测与成本">第六步：可观测与成本</a></li><li><a href="#用本地实验室算第一版容量">用本地实验室算第一版容量</a></li><li><a href="#上线顺序">上线顺序</a></li><li><a href="#最终架构原则">最终架构原则</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 19 章</div><h1>端到端：设计一个小型 AI 平台</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>将前面的机制合成一份档案馆平台草案。假设有 16 台服务器，每台 4 张同规格 GPU，白天提供问答，夜间进行校对训练。所有容量与目标都是教学设定，尚未在真实集群验收。</p>
 <h2 id="第一步-定义负载">第一步：定义负载<a class="anchor" href="#第一步-定义负载" aria-label="链接到本节">#</a></h2>
-<p>在线推理：</p>
-<ul>
-<li>一个 7B 模型；</li>
-<li>95% prompt 小于 8K，少量到 32K；</li>
-<li>目标 p95 TTFT 小于 2 秒；</li>
-<li>流量白天高，夜间低；</li>
-<li>允许限流，不允许无限排队。</li>
-</ul>
-<p>训练：</p>
-<ul>
-<li>8、16 或 32 GPU 作业；</li>
-<li>单次运行数小时到数天；</li>
-<li>可被低频抢占，但必须 checkpoint；</li>
-<li>数据和 checkpoint 在对象存储。</li>
-</ul>
-<p>这一步没有框架名，但决定后面的选择。</p>
+<p>交互目录请求输入大多在 1500 token 以内，输出通常不超过 300；长卷宗另走异步入口，避免其延迟目标与交互混用。候选首字目标为 p95 小于 1.2 秒，入口允许有界拒绝。</p>
+<p>训练提供 4、8、16 GPU 三种模板，允许有条件抢占，要求能保存并恢复数据位置。数据与检查点使用远端存储，节点可保留缓存。先确认这些合同，再选择组件。</p>
 <h3 id="六十四张卡-不等于六十四张随时可借的卡">六十四张卡，不等于六十四张随时可借的卡<a class="anchor" href="#六十四张卡-不等于六十四张随时可借的卡" aria-label="链接到本节">#</a></h3>
-<p>在线副本需要长期保留与预热，训练 gang 需要连续拓扑，维护节点与故障余量也会减少可用池。先决定在线最低保障、训练可借范围和回收时间，再估算队列容量。否则白天扩推理时，所有卡可能已被不可中断的大作业占住。</p>
-<p>少量 32K 请求不能只藏在平均长度里，它们会占更多 KV 并影响其他请求。可以设独立限额或流量类别，明确长上下文如何获得容量，而不是任由它们与短交互争抢。</p>
+<p>部分设备必须给在线热容量，维护和故障也要留余量。训练即使可以借用夜间空闲设备，也需要约定白天回收通知、保存时限和不响应时的处理。</p>
+<p>先列受保障池、可借池与隔离池，再统计满足拓扑的可用组。总卡数相同，分散空闲与完整节点空闲对 gang 的意义不同。</p>
 <h2 id="第二步-节点层">第二步：节点层<a class="anchor" href="#第二步-节点层" aria-label="链接到本节">#</a></h2>
-<p>每个 GPU 节点固定 driver、container toolkit、Device Plugin 和监控 exporter。用标签描述 GPU 型号、互联域和本地 cache 状态。先做节点验收：单卡计算、节点内 NCCL、跨节点 NCCL、存储读取与故障上报。</p>
+<p>固定驱动、运行时、设备插件与监控组合，建立设备和互联标签。验收包括单卡执行、节点内外通信、存储读取以及设备错误上报，不只检查系统能识别卡。</p>
+<p>把模型和数据缓存视为可失去的加速层，远端保留权威来源。缓存失效或节点替换后，平台仍需能重新建立可运行状态。</p>
 <h2 id="第三步-训练队列">第三步：训练队列<a class="anchor" href="#第三步-训练队列" aria-label="链接到本节">#</a></h2>
-<p>用 Volcano 或等价批调度能力表达 PodGroup、队列和优先级。提供少量模板：</p>
-<ul>
-<li>8 GPU 单节点；</li>
-<li>16 GPU 双节点；</li>
-<li>32 GPU 四节点。</li>
-</ul>
-<p>模板绑定拓扑、镜像、网络和 checkpoint 约定，减少用户自行组合错误。</p>
+<p>使用支持作业级准入的调度能力管理组、队列与优先级。三个模板分别约定成员数、每成员设备、网络和 checkpoint 行为，避免用户自行拼接复杂 affinity。</p>
+<p>抢占能力要通过实际保存与恢复演练。平台不能只因为发得出终止信号，就向调度策略声明任务可安全抢占。</p>
 <h2 id="第四步-推理服务">第四步：推理服务<a class="anchor" href="#第四步-推理服务" aria-label="链接到本节">#</a></h2>
-<p>7B 模型若单卡可容纳，先用单卡副本做数据并行扩容，避免无必要 TP。每个副本使用连续批处理和分页 KV。网关按模型与租户路由，限制 prompt 和 max tokens。</p>
-<p>容量不足时按顺序检查：</p>
-<ol>
-<li>权重与 KV 是否有合理余量；</li>
-<li>当前瓶颈是 queue、prefill 还是 decode；</li>
-<li>增加单卡副本能否线性提高总吞吐；</li>
-<li>模型确实放不下时再引入 TP；</li>
-<li>跨节点 TP 是否值得通信成本。</li>
-</ol>
+<p>先用教学 3B 模型建立单卡基线，确认实际显存余量与延迟，再考虑复制更多副本。每个副本使用合适的缓存和连续批处理，网关施加租户与长度边界。</p>
+<p>若模型装不下才研究必要分片；若单卡已满足容量但总吞吐不足，独立副本可能更直接。不要为使用全部卡数而引入额外协作。</p>
 <h3 id="用两种流量找到第一版副本工作点">用两种流量找到第一版副本工作点<a class="anchor" href="#用两种流量找到第一版副本工作点" aria-label="链接到本节">#</a></h3>
-<p>先测短交互类，再测长 prompt 类，各自逐步增加到达率，记录 TTFT、ITL、KV 与等待。将满足目标的区间当作每副本工作点，而不是把最大吞吐值直接用于承诺。再混合两类，验证长请求没有破坏短请求目标。</p>
-<p>算容量时保留一个副本或节点故障的余量，并将冷启动时间放进扩容计划。离线显存计算只排除明显装不下的方案，真正服务能力需目标硬件和模型验证。</p>
+<p>分别重放目录快问和长卷宗输入，逐步提高到达率，记录首字、ITL、有效速率和 KV。以满足相应目标的最高稳定区间作为候选，不拿过载峰值作为承诺。</p>
+<p>再混合两类并注入一个副本退出，观察入口是否有界、剩余副本是否被重试压垮。容量表应说明故障余量，而不是只列正常时均值。</p>
 <h2 id="第五步-扩缩容">第五步：扩缩容<a class="anchor" href="#第五步-扩缩容" aria-label="链接到本节">#</a></h2>
-<p>最小副本保证低流量 TTFT。扩容信号使用 queued tokens、TTFT 和活跃序列，GPU 利用率只作辅助。模型 cache 预热到候选节点，限制同时冷启动数。</p>
-<p>缩容先 drain，不接新请求，等待当前生成完成或 deadline。夜间可降低副本，但不能让第一个请求承担完整模型下载时间。</p>
+<p>最小热副本承担低流量体验，等待工作和预测流量触发提前准备。模型下载与预热有并发上限，准备中的副本不计入可接流量容量。</p>
+<p>缩容前先退出路由，再排空或到期终止。若夜间要回收设备给训练，必须把排空时间与训练准入窗口一起规划。</p>
 <h2 id="第六步-可观测与成本">第六步：可观测与成本<a class="anchor" href="#第六步-可观测与成本" aria-label="链接到本节">#</a></h2>
-<p>每个请求记录模型版本、输入输出 token、queue/prefill/decode 时间和结果类别。每个训练 run 记录代码、数据、并行配置、GPU 拓扑和 checkpoint。</p>
-<p>周报只需要回答：</p>
-<ul>
-<li>SLO 是否达成；</li>
-<li>哪类请求或作业占最多 GPU 时间；</li>
-<li>排队来自容量还是调度碎片；</li>
-<li>每百万 token 成本如何变化；</li>
-<li>最大故障损失了多少训练进度。</li>
-</ul>
+<p>每次问答可追溯模型版本、长度、阶段等待和结果类别；训练可追溯数据、代码、mesh 和保存点。细粒度标识进入受控日志，有限维度进入指标。</p>
+<p>定期比较体验达成率、有效交付成本、排队来源与失败回退量。若成本下降来自拒绝更多困难请求，应在同一份结果中显式显示，而非包装成单纯优化。</p>
 <h2 id="用本地实验室算第一版容量">用本地实验室算第一版容量<a class="anchor" href="#用本地实验室算第一版容量" aria-label="链接到本节">#</a></h2>
 <pre><code class="language-bash">python3 examples/infra_lab.py memory \
-  --parameters 7 \
-  --weight-bits 16 \
-  --context 8192 \
-  --concurrent-requests 8
+  --parameters 3 --weight-bits 16 \
+  --layers 24 --kv-heads 4 --head-dim 96 \
+  --context 6144 --concurrent-requests 6
+python3 examples/infra_lab.py simulate
+python3 examples/infra_lab.py check
 </code></pre>
-<p>结果显示权重和 KV 的理论小计，再预留运行时空间。它不能替代 vLLM benchmark，但能快速发现“配置在容量上根本不可能”。</p>
-<p>调度模拟：</p>
-<pre><code class="language-bash">python3 examples/infra_lab.py simulate
-</code></pre>
-<p>修改源码中的 token budget 和 block 数，观察 TTFT 与完成时间。真实引擎更复杂，但仍围绕预算、KV 和公平性做选择。</p>
+<p>权重与逻辑 KV 小计约 6.85 GiB，仍需工作区、块浪费和运行时。若该下界已超设备容量，就无需先做昂贵部署；若低于容量，也只是值得继续验证。</p>
+<p>模拟器能检查预算与生命周期，不能给出每副本真实到达率。工作点仍需在目标硬件上用代表性输入实测。</p>
 <h2 id="上线顺序">上线顺序<a class="anchor" href="#上线顺序" aria-label="链接到本节">#</a></h2>
-<ol>
-<li>单卡离线正确性；</li>
-<li>单卡固定长度 benchmark；</li>
-<li>单卡真实长度分布；</li>
-<li>单节点多副本或 TP；</li>
-<li>故障注入和恢复；</li>
-<li>小流量在线；</li>
-<li>扩缩容与滚动升级；</li>
-<li>多节点和批调度。</li>
-</ol>
-<p>每一步留下基线和回滚点。一次性把模型、量化、并行、scheduler 和集群全部换掉，出了问题就无法定位。</p>
+<p>先验证单卡正确性与固定形状，再扩大到真实长度分布。随后增加副本或必要并行，演练保存、故障和排空，再接小流量并逐步开放扩缩容。</p>
+<p>每阶段只改变能解释的因素，保留已知可用配置。若同时换模型、量化、引擎和拓扑，即使结果退化也很难定位责任项。</p>
 <h3 id="最小平台也要演练一条完整失败路径">最小平台也要演练一条完整失败路径<a class="anchor" href="#最小平台也要演练一条完整失败路径" aria-label="链接到本节">#</a></h3>
-<p>暂停一个训练 worker，确认整组停止、完整 checkpoint 被选中、数据位置恢复；移除一个推理副本，确认路由停止接入、用户收到明确结果且其他副本未过载。分别记录回退计算量与恢复时间。</p>
-<p>若这些路径没跑过，增加更多 operator 只会增加未知项。先让少数模板的启动、保存、恢复与升级可靠，再扩模型和并行配置，平台的约束才能被团队真正理解。</p>
+<p>中断一个训练成员，核对整组退出、完整保存点选择、数据位置恢复以及下一次保存。让一个推理组退出接入，检查旧流结束与新流分配，并测剩余容量是否还能兑现目标。</p>
+<p>记录恢复时间、损失步骤、重复请求与人工动作。这些结果比“已安装高可用组件”更接近平台可恢复性的证据。</p>
 <h2 id="最终架构原则">最终架构原则<a class="anchor" href="#最终架构原则" aria-label="链接到本节">#</a></h2>
-<ul>
-<li>字节账本先于采购；</li>
-<li>workload 先于框架；</li>
-<li>单卡基线先于多卡；</li>
-<li>拓扑先于并行度；</li>
-<li>队列时间先于 GPU 利用率；</li>
-<li>恢复演练先于“高可用”声明；</li>
-<li>简单可测的系统优于组件齐全的系统。</li>
-</ul>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="18-failure-recovery.html"><small>上一章</small><strong>故障恢复：把失败当作正常路径</strong></a><a class="next" href="appendix-glossary.html"><small>下一章</small><strong>术语、公式与命令速查</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>采购依据是字节和实测工作点，布局依据是实际通信路径，扩缩依据是可兑现的用户等待。少量模板只要能解释启动、运行、保存和失败，就比大量未经演练的配置更适合作为第一版平台。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="18-failure-recovery.html"><small>上一章</small><strong>故障恢复：把失败当作正常路径</strong></a><a class="next" href="appendix-glossary.html"><small>下一章</small><strong>术语、公式与命令速查</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

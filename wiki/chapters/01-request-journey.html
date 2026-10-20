@@ -1,82 +1,56 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>一条请求穿过哪些系统 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 01</div><div class="rail-title">一条请求穿过哪些系统</div><ol><li><a href="#数据面-请求真正走过的路">数据面：请求真正走过的路</a></li><li><a href="#控制面-谁让服务存在">控制面：谁让服务存在</a></li><li><a href="#两个调度器">两个调度器</a></li><li><a href="#第一个排障方法-画时间线">第一个排障方法：画时间线</a></li><li><a href="#离线与训练路径有什么不同">离线与训练路径有什么不同</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 01 章</div><h1>一条请求穿过哪些系统</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>用户点击发送后，GPU 并不会立刻开始计算。请求通常要经过网关、服务副本、引擎队列、tokenizer、调度器和 GPU worker。集群控制面则在旁边保证这些组件存在于合适的机器上。</p>
-<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 360" role="img" aria-label="一次推理请求从客户端经过网关、调度器到 GPU 的路径">
-<defs><marker id="rq" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" class="arrow-fill"/></marker></defs>
-<text x="40" y="38" class="eyebrow">CONTROL PLANE + DATA PLANE</text>
-<g class="box"><rect x="40" y="80" width="130" height="82" rx="4"/><rect x="220" y="80" width="130" height="82" rx="4"/><rect x="400" y="80" width="130" height="82" rx="4"/><rect x="580" y="80" width="130" height="82" rx="4"/><rect x="760" y="80" width="100" height="82" rx="4"/></g>
-<g class="label"><text x="105" y="115" text-anchor="middle">客户端</text><text x="105" y="140" text-anchor="middle" class="small">HTTP / stream</text><text x="285" y="115" text-anchor="middle">网关</text><text x="285" y="140" text-anchor="middle" class="small">鉴权 · 限流</text><text x="465" y="115" text-anchor="middle">服务副本</text><text x="465" y="140" text-anchor="middle" class="small">tokenize · queue</text><text x="645" y="115" text-anchor="middle">引擎调度器</text><text x="645" y="140" text-anchor="middle" class="small">batch · KV block</text><text x="810" y="115" text-anchor="middle">GPU</text><text x="810" y="140" text-anchor="middle" class="small">kernel</text></g>
-<g class="flow" marker-end="url(#rq)"><path d="M170 121H213"/><path d="M350 121H393"/><path d="M530 121H573"/><path d="M710 121H753"/></g>
-<g class="box soft"><rect x="220" y="230" width="490" height="76" rx="4"/></g><text x="465" y="260" text-anchor="middle" class="label">集群控制面</text><text x="465" y="285" text-anchor="middle" class="small">Kubernetes · Device Plugin · Operator · Scheduler</text>
-<g class="dashed"><path d="M285 230V170"/><path d="M465 230V170"/><path d="M645 230V170"/></g>
-</svg><figcaption>图：一次在线推理请求的数据面与控制面。</figcaption></figure>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 01</div><div class="rail-title">一条请求穿过哪些系统</div><ol><li><a href="#数据面-请求真正走过的路">数据面：请求真正走过的路</a></li><li><a href="#控制面-谁让服务存在">控制面：谁让服务存在</a></li><li><a href="#两个调度器">两个调度器</a></li><li><a href="#第一个排障方法-画时间线">第一个排障方法：画时间线</a></li><li><a href="#离线与训练路径有什么不同">离线与训练路径有什么不同</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 01 章</div><h1>一条请求穿过哪些系统</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>读者请求“比较两份航海日志里的气压记录”。系统已经接受连接，屏幕却迟迟没有文字。这个现象至少涉及接入、分词、引擎等待、模型计算与回传，不能仅凭客户端计时判断是哪一层忙。</p>
+<figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 440" role="img" aria-label="一条档案问答：执行与准备分开观察"><title>一条档案问答：执行与准备分开观察</title><rect width="960" height="440" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">一条档案问答：执行与准备分开观察</text><text x="30" y="130" font-size="18" fill="#56616b" text-anchor="start">接入</text><path d="M115 165 L925 165" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="240" font-size="18" fill="#56616b" text-anchor="start">引擎</text><path d="M115 275 L925 275" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="360" font-size="18" fill="#56616b" text-anchor="start">准备</text><path d="M115 395 L925 395" stroke="#bfc8cc" stroke-width="2" fill="none"/><rect x="140" y="85" width="210" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="154" y="114" font-size="19" fill="#202b32" text-anchor="start">身份与限额</text><text x="154" y="140" font-size="15" fill="#56616b" text-anchor="start">请求 ID / 模型权限</text><path d="M350 118 L405 118" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="405.0,118.0 395.8,121.9 395.8,114.1" fill="#245d79"/><rect x="410" y="85" width="210" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="424" y="114" font-size="19" fill="#202b32" text-anchor="start">模板与分词</text><text x="424" y="140" font-size="15" fill="#56616b" text-anchor="start">形成实际 token 序列</text><path d="M515 153 L515 205" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="515.0,205.0 511.1,195.8 518.9,195.8" fill="#245d79"/><rect x="140" y="205" width="210" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="154" y="234" font-size="19" fill="#202b32" text-anchor="start">等待资源</text><text x="154" y="260" font-size="15" fill="#56616b" text-anchor="start">预算、序列数、KV 块</text><path d="M515 190 L245 205" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="245.0,205.0 254.0,200.6 254.4,208.4" fill="#245d79"/><path d="M350 238 L405 238" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="405.0,238.0 395.8,241.9 395.8,234.1" fill="#245d79"/><rect x="410" y="205" width="210" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="424" y="234" font-size="19" fill="#202b32" text-anchor="start">GPU 组执行</text><text x="424" y="260" font-size="15" fill="#56616b" text-anchor="start">多 rank 协作</text><path d="M620 238 L675 238" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="675.0,238.0 665.8,241.9 665.8,234.1" fill="#245d79"/><rect x="680" y="205" width="240" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="694" y="234" font-size="19" fill="#202b32" text-anchor="start">解码与回传</text><text x="694" y="260" font-size="15" fill="#56616b" text-anchor="start">设备时间 ≠ 收到时间</text><rect x="140" y="325" width="240" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="154" y="354" font-size="19" fill="#202b32" text-anchor="start">节点 / 设备 / 模型</text><text x="154" y="380" font-size="15" fill="#56616b" text-anchor="start">控制面先准备容量</text><path d="M380 350 L510 280" stroke="#245d79" stroke-width="2" fill="none" stroke-dasharray="6 5"/><text x="550" y="366" font-size="16" fill="#56616b" text-anchor="start">虚线：准备依赖，不是每 token 请求</text></g></svg>
+<figcaption>图：档案问答请求的三条泳道：接入处理、引擎执行与资源准备。虚线表示准备关系，不表示逐 token 调用。</figcaption></figure>
 
 <h2 id="数据面-请求真正走过的路">数据面：请求真正走过的路<a class="anchor" href="#数据面-请求真正走过的路" aria-label="链接到本节">#</a></h2>
 <h3 id="1-网关">1. 网关<a class="anchor" href="#1-网关" aria-label="链接到本节">#</a></h3>
-<p>网关处理 TLS、身份、限流、配额和路由。它不应理解 GPU kernel，但需要知道模型名、租户和请求大小，以便拒绝明显超限的输入。</p>
+<p>入口为读者确认身份，检查可用模型与额度，并把请求送到适当副本。限流应同时考虑请求条数和输入大小。十个短问题与十份长篇档案的工作量差异很大，仅按连接数限流会掩盖后者的压力。</p>
 <h3 id="2-api-服务">2. API 服务<a class="anchor" href="#2-api-服务" aria-label="链接到本节">#</a></h3>
-<p>服务副本解析 OpenAI 兼容请求或内部协议，应用 chat template，并把文本变成 token IDs。tokenizer 主要在 CPU 上工作。高并发时，CPU tokenizer 也可能成为瓶颈。</p>
+<p>服务将角色消息套入目标模型的聊天模板，再分词形成整数序列。模板版本也会改变 token 数，因此预估长度和最终入队长度可能不同。若 CPU 分词已经积压，增加 GPU 的调度预算并不能消除这段等待。</p>
 <h3 id="3-引擎调度器">3. 引擎调度器<a class="anchor" href="#3-引擎调度器" aria-label="链接到本节">#</a></h3>
-<p>调度器维护等待和运行中的序列，决定本轮处理谁、处理多少 token、分配哪些 KV block。vLLM 当前源码中，<code>EngineCore</code>、<code>Scheduler</code> 和 <code>KVCacheManager</code> 分别承担运行核心、请求调度和 KV 资源管理。</p>
+<p>一份输入只有同时满足本轮计算预算、序列上限和 KV 空间条件，才有机会被选中。vLLM 的 <code>EngineCore</code> 驱动引擎循环，<code>Scheduler</code> 决定工作分配，<code>KVCacheManager</code> 管理相关内存资源。它们操作的是请求状态，不负责给 Kubernetes 分配节点。</p>
 <h3 id="4-gpu-worker">4. GPU worker<a class="anchor" href="#4-gpu-worker" aria-label="链接到本节">#</a></h3>
-<p>worker 加载模型并执行 kernel。单卡时它是一个 GPU 进程；张量并行时，一次逻辑推理需要多个 rank 协同。任何一个 rank 卡住，整体步骤都可能等待。</p>
+<p>worker 根据调度结果执行模型。采用张量并行时，多张卡共同完成一个逻辑步骤；不能把它理解成每张卡独立回答一位读者。某个参与者尚未到达通信点，其他参与者即使计算完成也可能继续等待。</p>
 <h3 id="5-流式回传">5. 流式回传<a class="anchor" href="#5-流式回传" aria-label="链接到本节">#</a></h3>
-<p>生成 token 经 detokenize 后成为文本增量，再穿过服务与网关回到客户端。客户端看到“流式”，不代表 GPU 每生成一个 token 就发一个独立网络包，中间层可能聚合或缓冲。</p>
+<p>采样后的 token 经文本解码形成增量，经应用协议返回浏览器。一个 token 可能只构成半个可显示片段，代理也可能合并若干增量发送。应分别记录设备生成时间和客户端收到时间，检查缓冲造成的间隙。</p>
 <h3 id="请求进入副本-不等于已经得到-gpu-时间">请求进入副本，不等于已经得到 GPU 时间<a class="anchor" href="#请求进入副本-不等于已经得到-gpu-时间" aria-label="链接到本节">#</a></h3>
-<p>假设用户发送一篇长文。网关检查身份与长度，API 将文字转成 token，调度器才判断这一轮是否有 token budget 和 KV block。连接已经建立、服务也健康，请求仍可能在引擎等待。若只测 HTTP 建连时间，就会漏掉用户实际感受到的等待。</p>
-<p>GPU worker 处理完成后，输出还要经过采样、文本解码和网络缓冲。用户一秒没有收到文字，可能是模型慢，也可能是回传被缓冲。排查时记录各层时间，而不是把最后可见的卡顿全部归给 GPU。</p>
+<p>假设教学轨迹中，请求在 0 ms 被入口接受，18 ms 分词完成，直到 96 ms 才进入第一次模型执行。18 到 96 ms 的 78 ms 属于引擎排队。服务的存活检查全部正常，也不会使这段等待消失。</p>
+<p>若设备在 140 ms 已生成首个可用片段，而浏览器到 200 ms 才显示，另有 60 ms 位于设备之后。应检查文本拼接、应用刷新和反向代理缓冲，不能把这 60 ms 再记为 prefill。</p>
 <h2 id="控制面-谁让服务存在">控制面：谁让服务存在<a class="anchor" href="#控制面-谁让服务存在" aria-label="链接到本节">#</a></h2>
-<p>Kubernetes 或其他调度系统负责选择节点、创建 Pod、挂载模型和重启失败实例。Device Plugin 把节点 GPU 注册成可调度资源。Operator 将“我要一个推理集群”翻译成 Deployment、Service、配置和状态调和。</p>
-<p>控制面通常不参与每个 token 的热路径，但它的决定影响数据面：</p>
-<ul>
-<li>Pod 被放到没有高速互联的 GPU 上，张量并行会变慢；</li>
-<li>模型下载没有本地缓存，冷启动会很长；</li>
-<li>健康检查太激进，长 prefill 可能被误判为卡死；</li>
-<li>扩容只看 GPU 利用率，排队已经上升却不触发。</li>
-</ul>
+<p>副本运行前，需要节点、设备、模型文件和网络服务。控制器根据期望状态创建或修复这些资源，调度器挑选合适节点，Device Plugin 协助 kubelet 暴露设备。准备过程发生在请求热路径之外，却决定副本是否真正可接流量。</p>
+<p>例如新副本已经处于 Running，但仍在读取权重。若此时过早宣布 Ready，入口会把读者送入一条尚不能执行的路径。反过来，存活探针若把正常长初始化误认为死锁，会使加载永远无法结束。</p>
 <h2 id="两个调度器">两个调度器<a class="anchor" href="#两个调度器" aria-label="链接到本节">#</a></h2>
-<p>这是全书最重要的区分之一。</p>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
-<th>调度层</th>
-<th>调度对象</th>
-<th>时间尺度</th>
-<th>典型约束</th>
+<th>决策问题</th>
+<th>执行者</th>
+<th>可观察结果</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>集群调度器</td>
-<td>Pod、节点、GPU</td>
-<td>秒到分钟</td>
-<td>数量、拓扑、队列、优先级</td>
+<td>哪个节点承载这组进程</td>
+<td>集群调度层</td>
+<td>Pod 被绑定或继续 Pending</td>
 </tr>
 <tr>
-<td>推理调度器</td>
-<td>请求、序列、token</td>
-<td>毫秒级迭代</td>
-<td>token budget、KV block、抢占</td>
+<td>这轮给哪份输入多少计算份额</td>
+<td>引擎调度层</td>
+<td>请求被执行、暂停或留在队列</td>
 </tr>
 </tbody></table></div>
-<p>请求排队可能发生在网关、服务副本或引擎内部。只看 Kubernetes Pending Pod 无法判断用户为何等待，只看 vLLM 队列也看不到集群是否缺卡。</p>
+<p>前者面对 GPU 数量、标签与拓扑，后者面对 token 和 KV 块。两个等待队列应分别测量；把它们统称“服务排队”会使扩容和调参混在一起。</p>
 <h3 id="两个调度层可以分别健康-整体仍然慢">两个调度层可以分别健康，整体仍然慢<a class="anchor" href="#两个调度层可以分别健康-整体仍然慢" aria-label="链接到本节">#</a></h3>
-<p>集群已经给副本分配足够 GPU，但长请求占满 KV，新请求会在引擎里排队。反过来，引擎参数合适，扩容 Pod 因无卡 Pending，增加引擎 token budget 也不能创建新容量。前者要查活跃序列和内存，后者要查资源与拓扑。</p>
-<p>控制面修复通常需要秒到分钟，token 调度却每轮都发生。扩容决策必须有提前量，不能指望创建 Pod 像移入一个短请求一样即时完成。</p>
+<p>档案馆有两个空闲节点，但引擎副本数固定，空闲卡不会自动参加现有副本的计算。另一种情况是全部副本都已就绪，却被长上下文占据 KV，入口仍不断积累请求。第一种需要改变服务容量，第二种要检查负载和引擎资源边界。</p>
+<p>引擎的一轮选择能很快改变；创建新副本还要等待设备与权重。扩容应基于未来一段时间的压力，并配合有界排队，不能把控制面的动作当作即时救援。</p>
 <h2 id="第一个排障方法-画时间线">第一个排障方法：画时间线<a class="anchor" href="#第一个排障方法-画时间线" aria-label="链接到本节">#</a></h2>
-<p>一次请求慢，先拆成：</p>
-<pre><code class="language-text">网络与网关 -&gt; 服务排队 -&gt; tokenize -&gt; 引擎排队
--&gt; prefill -&gt; decode 多轮 -&gt; detokenize -&gt; 网络回传
-</code></pre>
-<p>给每段打时间戳，不要先猜 GPU 不够。短请求的延迟常被排队和框架开销主导，长生成才更可能由 decode 主导。</p>
+<p>为同一请求 ID 记录入口接受、分词完成、首次被调度、首个生成片段、最后生成片段和客户端结束。计算相邻时间点的差，而非把每层各报的“总耗时”相加，后者可能重复计算重叠区间。</p>
+<p>上例中的 78 ms 排队可以与活跃 KV、等待 token 一起查看。若分词耗时增长而引擎空闲，则应回到 CPU 和输入处理链。时间线让优化动作对应到一段可验证的等待。</p>
 <h2 id="离线与训练路径有什么不同">离线与训练路径有什么不同<a class="anchor" href="#离线与训练路径有什么不同" aria-label="链接到本节">#</a></h2>
-<p>批量推理可以提前分桶、容忍更长等待，目标偏总吞吐。训练没有逐请求网关，但多了数据加载、反向传播、优化器和 checkpoint。两者共享 GPU、通信和存储基础，调度目标却不同。</p>
+<p>夜间批量整理档案时，任务可以按长度分桶，延后短任务的交付换取更好的设备复用。训练则用数据 batch 驱动，不逐条等待读者提问，还会进行反向计算、参数更新和状态保存。它们共享设备，却不应沿用同一组用户延迟目标。</p>
 <h3 id="训练为什么没有网关-仍然会等待">训练为什么没有网关，仍然会等待<a class="anchor" href="#训练为什么没有网关-仍然会等待" aria-label="链接到本节">#</a></h3>
-<p>训练 step 先等数据 batch，再做计算和通信，周期性还等待 checkpoint。用户请求队列消失了，但数据队列和 rank 同步依赖仍存在。吞吐低时，沿 batch 从存储到 GPU 的路追踪，和沿在线请求追时间线使用的是同一种方法：找出谁已经准备好、谁还没准备好。</p>
+<p>如果校对数据尚未从对象存储读出，GPU 会等待下一批；若一个 rank 读盘较慢，同步训练中的其他 rank 还可能在 collective 处等它。应把数据可用、计算开始和同步结束画到各 rank 的泳道上，才能区分慢网络和慢输入。</p>
 <h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
-<ul>
-<li><code>vllm/v1/engine/core.py</code></li>
-<li><code>vllm/v1/core/sched/scheduler.py</code></li>
-<li><code>vllm/v1/core/kv_cache_manager.py</code></li>
-<li><code>k8s-device-plugin/internal/plugin/</code></li>
-<li><code>kuberay/ray-operator/</code></li>
-</ul>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="00-preface.html"><small>上一章</small><strong>读前说明：不懂 CUDA 也能开始</strong></a><a class="next" href="02-model-basics.html"><small>下一章</small><strong>最少模型知识：token、tensor 与参数</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>从 <code>vllm/v1/engine/core.py</code> 追请求进入引擎，再看 <code>vllm/v1/core/sched/scheduler.py</code> 如何产生本轮工作。涉及块的申请和释放时转到 <code>vllm/v1/core/kv_cache_manager.py</code>。准备设备的代码则在 <code>k8s-device-plugin/internal/plugin/</code>，服务调和可从 <code>kuberay/ray-operator/</code> 查起。读这些路径时，以同一对象的创建、使用和释放串联调用关系。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="00-preface.html"><small>上一章</small><strong>读前说明：不懂 CUDA 也能开始</strong></a><a class="next" href="02-model-basics.html"><small>下一章</small><strong>最少模型知识：token、tensor 与参数</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

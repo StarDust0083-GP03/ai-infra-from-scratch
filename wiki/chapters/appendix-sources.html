@@ -1,122 +1,94 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>源码地图、来源与版本说明 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
 <header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Appendix</div><div class="rail-title">源码地图、来源与版本说明</div><ol><li><a href="#机制-算例与实测分别说明什么">机制、算例与实测分别说明什么</a></li><li><a href="#本地源码快照">本地源码快照</a></li><li><a href="#官方材料">官方材料</a></li><li><a href="#论文">论文</a></li><li><a href="#建议的源码阅读顺序">建议的源码阅读顺序</a></li><li><a href="#原创性与限制">原创性与限制</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">附录 B</div><h1>源码地图、来源与版本说明</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><h2 id="机制-算例与实测分别说明什么">机制、算例与实测分别说明什么<a class="anchor" href="#机制-算例与实测分别说明什么" aria-label="链接到本节">#</a></h2>
-<p>正文依据来源解释引擎、通信和控制面的职责；手算 tensor、显存和 Roofline 使用显式假设，证明数量关系；标准库实验演示预算与请求推进。它们都不构成目标 GPU 上的性能测试，也没有验证真实多节点训练或 Kubernetes 部署。</p>
-<p>迁移到实际模型时，应补目标精度 kernel、长度分布、通信拓扑和故障恢复实验。优先保留单卡与简单配置基线，每次只改变一项，才能判断优化结果来自哪条机制。</p>
+<p>阅读代码可以核对职责与可达路径，论文可解释设计与复杂度，手算可发现数量和单位错误，离线程序可检验它明确实现的规则。它们不能替代目标 GPU、互联和线上流量的实测。</p>
+<p>新版正文采用档案馆问答与校对训练作为虚构背景。模型尺寸、时间线和硬件上限均为教学假设；未声称这些配置在真实平台达到相应服务目标。迁移时应重新验证精度、执行实现、负载和恢复条件。</p>
 <h2 id="本地源码快照">本地源码快照<a class="anchor" href="#本地源码快照" aria-label="链接到本节">#</a></h2>
-<p>快照日期：2026-09-22。</p>
+<p>本书沿用已归档的 2026-09-22 快照作为事实依据，重写日期不意味着第三方源码已更新。</p>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
-<th>项目</th>
-<th>Commit</th>
-<th>重点目录</th>
+<th>项目与短提交</th>
+<th>用它核对的对象</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>vLLM</td>
-<td><code>ca831d1c5571</code></td>
-<td><code>vllm/v1/core</code>、<code>vllm/v1/engine</code>、<code>vllm/distributed</code></td>
+<td>vLLM <code>ca831d1c5571</code></td>
+<td>引擎循环、调度输出、缓存块生命周期</td>
 </tr>
 <tr>
-<td>TorchTitan</td>
-<td><code>7349a2282d9e</code></td>
-<td><code>torchtitan/distributed</code>、<code>components</code>、<code>observability</code></td>
+<td>TorchTitan <code>7349a2282d9e</code></td>
+<td>训练步骤、并行组和保存状态</td>
 </tr>
 <tr>
-<td>Megatron-LM</td>
-<td><code>c343bb6d337e</code></td>
-<td><code>megatron/core/*_parallel</code>、<code>dist_checkpointing</code></td>
+<td>Megatron-LM <code>c343bb6d337e</code></td>
+<td>层内与层间切分、全局状态布局</td>
 </tr>
 <tr>
-<td>NCCL</td>
-<td><code>12df1a11afad</code></td>
-<td><code>src/graph</code>、<code>transport</code>、<code>enqueue</code>、<code>ras</code></td>
+<td>NCCL <code>12df1a11afad</code></td>
+<td>通信入队、拓扑与传输实现</td>
 </tr>
 <tr>
-<td>NVIDIA Device Plugin</td>
-<td><code>3dd82d32e62c</code></td>
-<td><code>internal/plugin</code>、<code>rm</code>、<code>mig</code></td>
+<td>NVIDIA Device Plugin <code>3dd82d32e62c</code></td>
+<td>设备发现、健康与容器分配</td>
 </tr>
 <tr>
-<td>Volcano</td>
-<td><code>d1fe35ed58fc</code></td>
-<td><code>pkg/scheduler</code>、<code>controllers</code></td>
+<td>Volcano <code>d1fe35ed58fc</code></td>
+<td>作业准入、队列与插件策略</td>
 </tr>
 <tr>
-<td>KubeRay</td>
-<td><code>e76908b64fc3</code></td>
-<td><code>ray-operator</code>、<code>config/prometheus</code></td>
+<td>KubeRay <code>e76908b64fc3</code></td>
+<td>分布式资源生命周期和调和</td>
 </tr>
 </tbody></table></div>
-<p>完整 URL、提交、文件与代码统计在 <code>sources/inventory.json</code>。仓库均为官方 GitHub 浅克隆，遵循各自许可证。</p>
+<p>完整定位信息保存在 <code>sources/inventory.json</code>。本地副本用于溯源，第三方许可证及版权仍归各项目；正文重写不改变这些事实材料。</p>
 <h2 id="官方材料">官方材料<a class="anchor" href="#官方材料" aria-label="链接到本节">#</a></h2>
-<p>URL 索引和本地归档：</p>
-<pre><code class="language-text">sources/web/sources.tsv
-sources/web/*.md
-</code></pre>
-<p>主要材料：</p>
-<ol>
-<li>vLLM architecture、PagedAttention、optimization、distributed serving、parallelism。</li>
-<li>PyTorch Distributed Overview、FSDP2、CUDA semantics、Distributed Checkpoint。</li>
-<li>TorchTitan 官方文档与仓库 README。</li>
-<li>NVIDIA GPU Performance Background、CUDA Best Practices、NCCL Overview。</li>
-<li>Kubernetes Schedule GPUs 与 NVIDIA Device Plugin。</li>
-<li>Volcano architecture、plugins 与 gang scheduling。</li>
-<li>Ray on Kubernetes / KubeRay。</li>
-<li>Hugging Face GPU memory anatomy 与单 GPU 训练性能指南。</li>
-</ol>
+<p><code>sources/web/sources.tsv</code> 记录归档 URL，<code>sources/web/</code> 中的 Markdown 保存当时材料。核对在线文档时注意它可能已经超出本书版本。</p>
+<p>推理部分主要借助 vLLM 的架构、分页、调优及分布式服务说明；训练与设备行为结合 PyTorch 的分布式、CUDA、FSDP2 和检查点文档，以及 TorchTitan 官方资料。硬件与通信参考 NVIDIA 的性能、CUDA 最佳实践和 NCCL 文档。</p>
+<p>集群部分使用 Kubernetes GPU 调度、NVIDIA 插件、Volcano 和 KubeRay 官方说明。Hugging Face 的内存与训练性能资料作为补充解释，具体实现仍回到目标框架核对。</p>
 <h2 id="论文">论文<a class="anchor" href="#论文" aria-label="链接到本节">#</a></h2>
-<ul>
-<li>Kwon et al., <em>Efficient Memory Management for Large Language Model Serving with PagedAttention</em>，arXiv:2309.06180。</li>
-<li>Shoeybi et al., <em>Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism</em>，arXiv:1909.08053。</li>
-<li>Rajbhandari et al., <em>ZeRO: Memory Optimizations Toward Training Trillion Parameter Models</em>，arXiv:1910.02054。</li>
-<li>Dao et al., <em>FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness</em>，arXiv:2205.14135。</li>
-<li>Williams, Waterman, Patterson, <em>Roofline: An Insightful Visual Performance Model for Floating-Point Programs and Multicore Architectures</em>，DOI:10.2172/1407078。</li>
-</ul>
-<p>论文摘要和元数据归档在 <code>sources/web/</code>。本书用它们确认设计动机，不复制论文图表。</p>
+<p>下列文献标识保留为可核对的来源，正文图解全部重新设计，不复刻其原始图表：</p>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>文献标识</th>
+<th>阅读目的</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Kwon et al., arXiv:2309.06180</td>
+<td>PagedAttention 的分配与共享动机</td>
+</tr>
+<tr>
+<td>Shoeybi et al., arXiv:1909.08053</td>
+<td>Megatron-LM 的模型切分组织</td>
+</tr>
+<tr>
+<td>Rajbhandari et al., arXiv:1910.02054</td>
+<td>ZeRO 对训练状态的分片递进</td>
+</tr>
+<tr>
+<td>Dao et al., arXiv:2205.14135</td>
+<td>FlashAttention 对显存 IO 的组织</td>
+</tr>
+<tr>
+<td>Williams, Waterman, Patterson, DOI:10.2172/1407078</td>
+<td>Roofline 的计算与带宽上界</td>
+</tr>
+</tbody></table></div>
+<p>实验图中的设备、模型和测量环境属于对应论文，不应移作本书虚构配置的性能证据。</p>
 <h2 id="建议的源码阅读顺序">建议的源码阅读顺序<a class="anchor" href="#建议的源码阅读顺序" aria-label="链接到本节">#</a></h2>
 <h3 id="vllm-请求执行">vLLM 请求执行<a class="anchor" href="#vllm-请求执行" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">entrypoints/openai
-  -&gt; v1/engine/llm_engine.py
-  -&gt; v1/engine/core.py
-  -&gt; v1/core/sched/scheduler.py
-  -&gt; v1/core/kv_cache_manager.py
-  -&gt; v1/worker/gpu_model_runner.py
-</code></pre>
-<p>先跟一次请求，不要先读所有模型实现和 kernel。</p>
+<p>从 <code>entrypoints/openai</code> 找请求如何成为引擎输入，沿 <code>v1/engine/llm_engine.py</code>、<code>v1/engine/core.py</code> 到调度器。随后检查 <code>v1/core/kv_cache_manager.py</code> 的资源行为，以及 <code>v1/worker/gpu_model_runner.py</code> 怎样消费调度结果。</p>
+<p>带一条会等待、推进并最终取消的请求，记录它跨边界时哪些字段发生变化，再深入模型实现。</p>
 <h3 id="torchtitan-训练">TorchTitan 训练<a class="anchor" href="#torchtitan-训练" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">train.py / training_engine.py
-  -&gt; components/data
-  -&gt; distributed parallel dims
-  -&gt; model parallelize
-  -&gt; optimizer
-  -&gt; checkpointer
-</code></pre>
-<p>每读一层，都标记该模块在 step 的哪一段运行。</p>
+<p>以 <code>train.py</code> 或对应训练引擎定位更新边界，接着查数据组件、并行维度、模型 parallelize、优化器和 checkpointer。每个模块都标注在当前步骤的什么时候运行，哪些状态会跨步延续。</p>
 <h3 id="megatron-多维并行">Megatron 多维并行<a class="anchor" href="#megatron-多维并行" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">parallel_state.py
-  -&gt; tensor_parallel
-  -&gt; pipeline_parallel
-  -&gt; transformer/transformer_config.py
-  -&gt; distributed
-</code></pre>
-<p>先画 rank group，再读映射函数。</p>
+<p>先画 <code>parallel_state.py</code> 形成的组，再读 <code>tensor_parallel</code> 和 <code>pipeline_parallel</code> 的数据映射。模型配置可在 <code>transformer/transformer_config.py</code> 核对，分布式状态相关实现再进入 <code>distributed</code>。</p>
 <h3 id="nccl">NCCL<a class="anchor" href="#nccl" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">public API
-  -&gt; enqueue
-  -&gt; graph/topology
-  -&gt; transport
-  -&gt; device code
-</code></pre>
-<p>底层会随硬件演进，应用开发首先理解 collective 语义和 topology 选择。</p>
+<p>先理解公共操作的输入输出合同，再跟随 enqueue、拓扑规划和 transport。只有需要分析具体设备执行时才深入 device 代码，否则容易丢掉“谁需要从谁得到什么”的原始问题。</p>
 <h3 id="kubernetes-gpu">Kubernetes GPU<a class="anchor" href="#kubernetes-gpu" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">cmd/nvidia-device-plugin
-  -&gt; internal/plugin
-  -&gt; internal/resource manager
-  -&gt; kubelet device plugin API
-</code></pre>
-<p>将发现、注册、分配和调度四个阶段分开。</p>
+<p>沿 <code>cmd/nvidia-device-plugin</code> 到 <code>internal/plugin</code> 与资源发现模块，区分发现、注册和 Allocate。另用 kubelet 与调度器职责补全节点选择过程，避免把插件误读为集群调度器。</p>
 <h2 id="原创性与限制">原创性与限制<a class="anchor" href="#原创性与限制" aria-label="链接到本节">#</a></h2>
-<p>本书结构、文字、示例、SVG 图和标准库模拟器均独立编写。官方仓库、文档和论文仅作为事实来源。没有复制外部博客结构或图表。</p>
-<p>本书不构成具体硬件采购或容量承诺。公式给出量级下界，真实性能受模型、数据类型、kernel、GPU、互联、请求分布和软件版本影响。任何上线配置都应在目标环境压测。</p>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="appendix-glossary.html"><small>上一章</small><strong>术语、公式与命令速查</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>本次保留章与节的结构，重新撰写说明、手算、教学代码和图形表达。真实 API、路径、论文标识和提交值作为事实引用保留，未修改归档第三方源码。</p>
+<p>容量公式刻画明确假设下的下界或量级；离线模拟没有真实 kernel、采样质量或网络时间。上线和采购都需要目标环境的正确性、峰值、性能与故障恢复证据，不能将这份教材当作配置保证书。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="appendix-glossary.html"><small>上一章</small><strong>术语、公式与命令速查</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

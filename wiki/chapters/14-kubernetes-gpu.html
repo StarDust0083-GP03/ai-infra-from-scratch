@@ -1,87 +1,55 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>Kubernetes 怎样看到 GPU · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 14</div><div class="rail-title">Kubernetes 怎样看到 GPU</div><ol><li><a href="#extended-resource">Extended Resource</a></li><li><a href="#device-plugin-的职责">Device Plugin 的职责</a></li><li><a href="#scheduler-知道多少">Scheduler 知道多少</a></li><li><a href="#mig-time-slicing-与-mps">MIG、Time-slicing 与 MPS</a></li><li><a href="#daemonset-与节点准备">DaemonSet 与节点准备</a></li><li><a href="#一个-pod-能用多卡-不等于多节点">一个 Pod 能用多卡，不等于多节点</a></li><li><a href="#排障顺序">排障顺序</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 14 章</div><h1>Kubernetes 怎样看到 GPU</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>Kubernetes 默认认识 CPU、内存和普通设备，但不会自动发现 NVIDIA GPU。Device Plugin 在每个节点运行，向 kubelet 注册可用设备，并在 Pod 分配时返回设备、挂载和环境配置。</p>
-<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 450" role="img" aria-label="Kubernetes 从节点 GPU 到 Pod 资源请求的控制链路">
-<text x="40" y="38" class="eyebrow">HOW KUBERNETES SEES A GPU</text>
-<g class="box"><rect x="50" y="75" width="180" height="78" rx="4"/><rect x="280" y="75" width="180" height="78" rx="4"/><rect x="510" y="75" width="180" height="78" rx="4"/><rect x="735" y="75" width="125" height="78" rx="4"/></g>
-<g class="label center"><text x="140" y="108">GPU / Driver</text><text x="370" y="108">Device Plugin</text><text x="600" y="108">Kubelet</text><text x="797" y="108">API Server</text></g><g class="small center"><text x="140" y="133">节点硬件</text><text x="370" y="133">发现与 Allocate</text><text x="600" y="133">注册 extended resource</text><text x="797" y="133">Node status</text></g>
-<g class="flow"><path d="M230 114H280"/><path d="M460 114H510"/><path d="M690 114H735"/></g>
-<g class="box soft"><rect x="180" y="235" width="540" height="122" rx="4"/></g><text x="450" y="270" text-anchor="middle" class="label">Pod spec</text><text x="450" y="307" text-anchor="middle" class="mono accent">limits: { nvidia.com/gpu: 1 }</text><text x="450" y="335" text-anchor="middle" class="small">Scheduler 按资源数量和节点约束放置 Pod</text>
-<path d="M797 160C797 220 720 220 720 270" class="dashed"/><text x="40" y="410" class="small">模型显存需求、KV 热度、NVLink 域和作业 gang 需要额外调度信息或上层系统表达。</text>
-</svg><figcaption>图：Device Plugin 把节点硬件转换成 Kubernetes extended resource。</figcaption></figure>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 14</div><div class="rail-title">Kubernetes 怎样看到 GPU</div><ol><li><a href="#extended-resource">Extended Resource</a></li><li><a href="#device-plugin-的职责">Device Plugin 的职责</a></li><li><a href="#scheduler-知道多少">Scheduler 知道多少</a></li><li><a href="#mig-time-slicing-与-mps">MIG、Time-slicing 与 MPS</a></li><li><a href="#daemonset-与节点准备">DaemonSet 与节点准备</a></li><li><a href="#一个-pod-能用多卡-不等于多节点">一个 Pod 能用多卡，不等于多节点</a></li><li><a href="#排障顺序">排障顺序</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 14 章</div><h1>Kubernetes 怎样看到 GPU</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>节点装好了 GPU，并不意味着 Kubernetes 已经能分配它。设备需要被发现、报告为资源，并在容器启动时获得正确访问条件。资源计数与模型真正可运行之间还有多层合同。</p>
+<figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 440" role="img" aria-label="资源声明到实际访问：按阶段定位"><title>资源声明到实际访问：按阶段定位</title><rect width="960" height="440" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">资源声明到实际访问：按阶段定位</text><rect x="40" y="105" width="190" height="76" fill="#e7eef0" stroke="#bfc8cc"/><text x="54" y="134" font-size="19" fill="#202b32" text-anchor="start">设备发现</text><text x="54" y="160" font-size="15" fill="#56616b" text-anchor="start">驱动 / 健康</text><rect x="270" y="105" width="190" height="76" fill="#e7eef0" stroke="#bfc8cc"/><text x="284" y="134" font-size="19" fill="#202b32" text-anchor="start">资源报告</text><text x="284" y="160" font-size="15" fill="#56616b" text-anchor="start">插件 → kubelet</text><rect x="500" y="105" width="190" height="76" fill="#e7eef0" stroke="#bfc8cc"/><text x="514" y="134" font-size="19" fill="#202b32" text-anchor="start">节点绑定</text><text x="514" y="160" font-size="15" fill="#56616b" text-anchor="start">scheduler</text><rect x="730" y="105" width="190" height="76" fill="#e7eef0" stroke="#bfc8cc"/><text x="744" y="134" font-size="19" fill="#202b32" text-anchor="start">设备暴露</text><text x="744" y="160" font-size="15" fill="#56616b" text-anchor="start">kubelet / runtime</text><path d="M230 143 L265 143" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="265.0,143.0 255.8,146.9 255.8,139.1" fill="#245d79"/><path d="M460 143 L495 143" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="495.0,143.0 485.8,146.9 485.8,139.1" fill="#245d79"/><path d="M690 143 L725 143" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="725.0,143.0 715.8,146.9 715.8,139.1" fill="#245d79"/><rect x="40" y="255" width="260" height="76" fill="#eee8dd" stroke="#bfc8cc"/><text x="54" y="284" font-size="19" fill="#202b32" text-anchor="start">节点无资源</text><text x="54" y="310" font-size="15" fill="#56616b" text-anchor="start">查注册和健康</text><rect x="350" y="255" width="260" height="76" fill="#eee8dd" stroke="#bfc8cc"/><text x="364" y="284" font-size="19" fill="#202b32" text-anchor="start">Pod Pending</text><text x="364" y="310" font-size="15" fill="#56616b" text-anchor="start">查数量与约束</text><rect x="660" y="255" width="260" height="76" fill="#eee8dd" stroke="#bfc8cc"/><text x="674" y="284" font-size="19" fill="#202b32" text-anchor="start">容器内不可见</text><text x="674" y="310" font-size="15" fill="#56616b" text-anchor="start">查分配与运行时</text><text x="40" y="395" font-size="20" fill="#a14929" text-anchor="start">整数量可分配 ≠ 显存足够 ≠ 多 rank 已就绪。</text></g></svg>
+<figcaption>图：从硬件健康到节点资源，再到 Pod 绑定和容器设备暴露，四个步骤分别有不同负责者。</figcaption></figure>
 
 <h2 id="extended-resource">Extended Resource<a class="anchor" href="#extended-resource" aria-label="链接到本节">#</a></h2>
-<p>Pod 常这样请求 GPU：</p>
-<pre><code class="language-yaml">resources:
-  limits:
-    nvidia.com/gpu: 1
+<p>一个档案批处理容器可以声明：</p>
+<pre><code class="language-yaml">apiVersion: v1
+kind: Pod
+metadata:
+  name: archive-indexer
+spec:
+  restartPolicy: Never
+  containers:
+    - name: worker
+      image: registry.example.org/archive-worker:validated
+      resources:
+        limits:
+          nvidia.com/gpu: 2
 </code></pre>
-<p>GPU 这类扩展资源是整数资源，通常写在 <code>limits</code>。不能像 CPU 一样请求 <code>0.25</code> 张物理 GPU。共享需要额外机制，例如 MIG、time-slicing 或 MPS，它们的隔离语义不同。</p>
+<p>镜像地址为教学示意，不能直接作为可拉取镜像。这里申请的是两个整数量资源，并不意味着默认允许 <code>0.5</code> 张物理卡。共享方案需要另外配置并说明隔离语义。</p>
 <h2 id="device-plugin-的职责">Device Plugin 的职责<a class="anchor" href="#device-plugin-的职责" aria-label="链接到本节">#</a></h2>
-<ul>
-<li>发现健康 GPU 或 MIG 设备；</li>
-<li>向 kubelet 注册资源名与数量；</li>
-<li>监控设备健康变化；</li>
-<li>Allocate 时返回设备节点、CDI、mount 或环境；</li>
-<li>暴露配置的共享策略。</li>
-</ul>
-<p>它不负责选择哪个节点。节点选择由 scheduler 根据资源和约束完成。</p>
+<p>插件发现设备、跟踪健康状态，向 kubelet 注册资源，并在分配时提供设备可访问所需的信息。实际可通过设备节点、环境、挂载或 CDI 等机制完成，依配置和版本而异。</p>
+<p>插件不替集群选择节点，也不判断模型的 KV 是否足够。它使设备成为可分配对象，应用运行条件仍由其他层共同保证。</p>
 <h2 id="scheduler-知道多少">Scheduler 知道多少<a class="anchor" href="#scheduler-知道多少" aria-label="链接到本节">#</a></h2>
-<p>默认 scheduler 看到某节点有 8 个 <code>nvidia.com/gpu</code>，某 Pod 要 2 个。它不天然知道：</p>
-<ul>
-<li>两卡是否有 NVLink；</li>
-<li>GPU 是哪个型号和显存；</li>
-<li>当前模型是否已在本地 cache；</li>
-<li>某卡上 KV cache 是否热；</li>
-<li>这 8 卡是否要作为一个 gang 同时给同一作业。</li>
-</ul>
-<p>型号可通过 node labels 和 affinity 表达，拓扑与 gang 常需要插件或专用 scheduler。</p>
+<p>调度器能依据节点报告的数量和 Pod 的约束选择放置位置。默认资源名本身通常不包含显存大小、模型热缓存或任意两卡之间的高速互联关系。</p>
+<p>型号和位置需求可借标签、亲和与拓扑机制表达，成组启动还需作业级调度支持。不要把 <code>nvidia.com/gpu: 2</code> 读成“自动给我最适合这个 TP 模型的一对卡”。</p>
 <h3 id="资源数字怎样一步步变成容器可访问的设备">资源数字怎样一步步变成容器可访问的设备<a class="anchor" href="#资源数字怎样一步步变成容器可访问的设备" aria-label="链接到本节">#</a></h3>
-<p>插件发现设备并向 kubelet 报告，节点状态呈现扩展资源，scheduler 据此选择节点；到容器启动阶段，Allocate 返回访问设备需要的信息。节点选择与具体设备暴露是两段工作。Pod Pending 与容器里看不到 GPU，可能发生在不同环节。</p>
-<p>默认资源计数只回答够不够张数，不回答这两张卡是否处于最佳互联域。型号标签、亲和与拓扑机制补这些条件，模型所需 KV 容量和热缓存则还在引擎层。</p>
+<p>先由节点插件报告设备，再由节点状态呈现可分配数量，调度器绑定 Pod，最后 kubelet 与运行时完成具体设备暴露。每一步都有独立失败方式。</p>
+<p>Pod 尚未绑定时检查调度事件；绑定成功但容器看不到设备时检查 Allocate、运行时和驱动库。跳过阶段区分而反复重启应用，会丢失有价值的现场。</p>
 <h2 id="mig-time-slicing-与-mps">MIG、Time-slicing 与 MPS<a class="anchor" href="#mig-time-slicing-与-mps" aria-label="链接到本节">#</a></h2>
 <h3 id="mig">MIG<a class="anchor" href="#mig" aria-label="链接到本节">#</a></h3>
-<p>把支持的 GPU 硬件切成隔离实例，拥有相对明确的计算和显存份额。适合稳定小负载，但 profile 固定，重配置有运维成本。</p>
+<p>支持的硬件可划出具有特定资源配置的实例。实例规格限制显存和计算份额，也影响能否承载某个模型。硬件分区带来的隔离与运维约束，需要结合设备支持及 profile 规划。</p>
 <h3 id="time-slicing">Time-slicing<a class="anchor" href="#time-slicing" aria-label="链接到本节">#</a></h3>
-<p>多个容器轮流使用同一 GPU，提高低利用任务的共享率，但通常不提供显存隔离保证。所有参与者的显存总需求仍受物理卡限制。</p>
+<p>多个逻辑使用者轮流共享设备执行机会。增加可声明份额有利于低负载复用，但通常不构成独立显存容量保证，也不使物理带宽成倍增加。</p>
 <h3 id="mps">MPS<a class="anchor" href="#mps" aria-label="链接到本节">#</a></h3>
-<p>允许多个 CUDA 进程更细粒度共享 GPU 执行资源，能改善并发，但隔离、兼容和故障域需要评估。</p>
-<p>不要把三者统称“虚拟 GPU”。先写出隔离、性能和故障需求。</p>
+<p>MPS 协调多个 CUDA 进程共享执行资源，可能改善并发效率。支持条件、限制和错误影响范围与 MIG 不同，需要使用真实应用验证，不能把三者一概称作同一种虚拟卡。</p>
 <h2 id="daemonset-与节点准备">DaemonSet 与节点准备<a class="anchor" href="#daemonset-与节点准备" aria-label="链接到本节">#</a></h2>
-<p>Device Plugin 通常以 DaemonSet 运行在 GPU 节点。完整节点还需要驱动、container runtime 配置、监控 exporter 和标签发现。GPU Operator 可以自动化部分生命周期，但自动化不会消除版本兼容矩阵。</p>
-<p>应固定并验证：</p>
-<ul>
-<li>driver 与 kernel；</li>
-<li>CUDA runtime 与容器镜像；</li>
-<li>Device Plugin 配置；</li>
-<li>MIG 模式；</li>
-<li>container toolkit；</li>
-<li>NCCL 和网络插件。</li>
-</ul>
+<p>插件通常通过 DaemonSet 覆盖 GPU 节点。节点还需要可用驱动、兼容的容器运行时和工具包、正确网络，以及必要监控。自动化 Operator 可以管理其中部分生命周期，但兼容组合仍需验证。</p>
+<p>给节点准备建立版本清单，包含内核、驱动、容器 CUDA 运行库、插件配置和通信组件。升级前用代表性单卡与多卡任务做检查，而不只确认 Pod 正常。</p>
 <h3 id="共享份额不应被当成显存承诺">共享份额不应被当成显存承诺<a class="anchor" href="#共享份额不应被当成显存承诺" aria-label="链接到本节">#</a></h3>
-<p>time-slicing 可以让更多进程轮流使用设备，但它们的显存需求仍叠加在物理卡上。两个各需要 20 GiB 的任务不能因配置了两个共享槽，就自动在 24 GiB 卡上共存。调度数字与物理隔离语义必须分别理解。</p>
-<p>MIG 给出硬件分区，profile 限定容量与计算；MPS 改善进程并发，却有自身兼容与故障边界。选择先看稳定容量、隔离和运行模型需求，再看可声明多少逻辑资源。</p>
+<p>假设物理卡有 16 GiB，两份任务各需 11 GiB。即使调度层暴露两个共享槽，也没有 22 GiB 物理空间可供它们同时驻留。</p>
+<p>若需要确定的显存边界，必须选择满足条件的隔离方案，并用真实模型峰值验收。共享利用率提升与容量保证是两种不同目标。</p>
 <h2 id="一个-pod-能用多卡-不等于多节点">一个 Pod 能用多卡，不等于多节点<a class="anchor" href="#一个-pod-能用多卡-不等于多节点" aria-label="链接到本节">#</a></h2>
-<p>单 Pod 请求 8 GPU 通常使用同一节点内设备。多节点训练通常是多个 Pod，每个 Pod 若干 GPU，再通过 rendezvous 组成 world。它需要 gang scheduling、稳定网络和 rank 配置。</p>
+<p>单个 Pod 的设备请求由一个节点满足，不能靠申请更多 GPU 自动跨越多个节点。多节点训练通常由多个 Pod 加上 rendezvous、rank 和进程组配置组成逻辑作业。</p>
+<p>这组进程还需要网络连通、共同版本及足够的启动资源。每个 Pod 各自拿到卡，不代表整个 world 已经可以执行 collective。</p>
 <h2 id="排障顺序">排障顺序<a class="anchor" href="#排障顺序" aria-label="链接到本节">#</a></h2>
-<ol>
-<li><code>nvidia-smi</code> 在节点是否正常；</li>
-<li>Device Plugin Pod 是否健康；</li>
-<li>Node allocatable 是否出现 GPU 资源；</li>
-<li>Pod request/limit 和 selector 是否正确；</li>
-<li>scheduler event 为什么 Pending；</li>
-<li>容器内设备与 driver library 是否可见；</li>
-<li>应用是否选择正确 local rank。</li>
-</ol>
-<p>把“Pod Pending”和“容器内 CUDA 错误”分开，它们属于调度与运行两个阶段。</p>
+<p>在节点上确认设备与驱动，再查插件是否报告健康资源，随后查看 Pod 申请和调度事件。容器启动后核对设备与库可见性，最后进入应用的 local rank、初始化和通信。</p>
+<p>这条路线由下层事实逐步走向应用，不会把节点故障、资源不足和模型 OOM 混成一个 CUDA 问题。保留事件和首错后再执行重启。</p>
 <h3 id="用故障所在层选择检查命令">用故障所在层选择检查命令<a class="anchor" href="#用故障所在层选择检查命令" aria-label="链接到本节">#</a></h3>
-<p>主机看不到设备先查硬件与驱动；主机正常但容器看不到，查 runtime 和设备分配；节点没呈现资源，查 plugin 注册和健康；Pod 有卡而模型挂起，再查 rank、通信和软件。不要从所有症状一律重启模型开始。</p>
-<p>多节点作业还需 rendezvous 和 group 配置，每个 Pod 得到本地 GPU 后才能共同组成 world。分配成功不是训练已就绪，健康检查应覆盖这个协作层。</p>
+<p><code>nvidia-smi</code> 用来检查主机设备，节点资源和 Pod event 用来解释分配，容器内设备与库检查解释运行时，rank 日志解释协作初始化。某层结果正常，只能排除相应问题，不能顺便证明下一层正确。</p>
+<p>若多节点挂起，先确认全部参与者是否进入同一 rendezvous，再核对网络和 collective。无需因为最后显示通信超时，就重新安装整个设备插件。</p>
 <h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
-<ul>
-<li><code>k8s-device-plugin/cmd/nvidia-device-plugin/</code></li>
-<li><code>k8s-device-plugin/internal/plugin/</code></li>
-<li><code>k8s-device-plugin/internal/rm/</code></li>
-<li><code>k8s-device-plugin/internal/mig/</code></li>
-<li>Kubernetes Schedule GPUs 文档</li>
-</ul>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="13-data-checkpoint.html"><small>上一章</small><strong>数据管道与 Checkpoint</strong></a><a class="next" href="15-batch-scheduling.html"><small>下一章</small><strong>批作业调度：为什么要一起开跑</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>启动注册可查 <code>k8s-device-plugin/cmd/nvidia-device-plugin/</code>，分配路径在 <code>k8s-device-plugin/internal/plugin/</code>，资源发现与 MIG 组织分别参考 <code>internal/rm/</code> 和 <code>internal/mig/</code>。结合 Kubernetes 的 Schedule GPUs 文档，把代码职责放回节点选择与容器启动的阶段中理解。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="13-data-checkpoint.html"><small>上一章</small><strong>数据管道与 Checkpoint</strong></a><a class="next" href="15-batch-scheduling.html"><small>下一章</small><strong>批作业调度：为什么要一起开跑</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

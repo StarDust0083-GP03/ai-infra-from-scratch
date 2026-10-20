@@ -1,105 +1,73 @@
 # 分片、重计算与并行组合
 
-单卡显存装不下训练状态时，第一反应不应是盲目增加 GPU。先确认要切的是数据、参数、激活、序列还是模型层，因为每一种切法引入不同通信。
+档案模型训练需要的状态超过单卡容量时，要先确定是长期训练状态还是本轮激活过大。不同切分方案降低不同项，并会改变数据交换与恢复方式。
 
 ## 从复制到完全分片
 
-普通数据并行在每个 rank 复制权重、梯度和优化器状态。FSDP 与 ZeRO 将这些状态按 rank 分片。
+普通数据并行让每个副本保存完整训练状态。将优化器、梯度乃至参数拆给多个 rank，可以减少每个参与者长期保留的内容，但使用时可能需要重新组装。
 
-{{diagram:training-memory|完全分片减少每卡长期保存的训练状态，但计算前后需要通信。}}
+{{diagram:training-memory|四列 rank 共享三类训练状态；旁边展开一次 unit 的组装、计算、梯度归约与重新分片。}}
 
 ### ZeRO 的教学分级
 
-- Stage 1：分片 optimizer state；
-- Stage 2：再分片 gradient；
-- Stage 3：再分片 parameter。
+Stage 1 从优化器状态分片开始，Stage 2 再划分梯度，Stage 3 进一步划分参数。这个递进用于理解省下什么、使用时补回什么，不意味着所有现代接口都直接以 stage 命名。
 
-现代框架的具体接口和内部实现不一定直接使用这些名字，但这个递进帮助理解：省得越多，按需组装与通信越多。
+完整方案还涉及何时通信、哪些状态保持高精度以及怎样保存。不能只从级别编号推断所有实现细节。
 
 ## FSDP2 的直觉
 
-每个 rank 平时保存参数 shard。某层计算前 AllGather 形成需要的参数，完成后可 reshard。Backward 同样需要参数，并通过 ReduceScatter 得到分片梯度。
+参数以 shard 驻留，需要执行某个 unit 时收集相应内容，完成后按策略重新分片。反向也有参数需求，并将梯度归约成分片形式。预取可以把部分通信提前，但会延长更多 buffer 同时存活的时间。
 
-关键调优点：
-
-- shard group 大小；
-- 哪些 module 作为一个 FSDP unit；
-- prefetch 与通信计算重叠；
-- forward 后是否 reshard；
-- mixed precision 和 CPU offload；
-- state dict 与 checkpoint 格式。
-
-过小的 unit 会产生大量小 collective，过大又提高峰值显存。
+unit 粒度是关键取舍：小 unit 缩小一次组装，却增加操作次数；大 unit 减少管理，却可能抬高峰值。应把显存与通信时间放到同一张实验表里。
 
 ### 分片后的常驻显存与计算峰值不同
 
-假设总参数 16 GiB，四个 rank 理想各常驻 4 GiB。某个 unit 大小也是 4 GiB，若计算前另分配完整参数 buffer，这一时刻就会同时存在常驻 4 GiB 和完整 buffer 4 GiB。预取下一 unit 还可能继续增加占用。这里是简化分配算例，实际生命周期依实现而异；关键是峰值不能只用总参数除以四。
+设总参数内容 12 GiB，四个 rank 理想各持 3 GiB。若本次需要额外组装一个 2 GiB unit，按“shard 与组装 buffer 同时存在”的教学假设，瞬时至少涉及 5 GiB 参数相关空间；预取下一 unit 可能再增加占用。
 
-FSDP unit 越大，一次组装越大；越小，collective 次数越多。粒度选择要看峰值与通信时间的共同曲线，省掉常驻状态只是优化的一部分。
+实际实现可能复用或释放部分空间，这个数字不是 FSDP 的固定保证。重要的是画出生命周期，不能仅把 12 除以 4 当作设备峰值。
 
 ## 3D 并行
 
-大规模训练常组合 DP/FSDP、TP 和 PP：
+DP 或 FSDP 处理样本与训练状态，TP 切层内工作，PP 切层序列。组合时，每个 rank 同时属于多种组，但每次通信只在对应组内进行。
 
-```text
-DP/FSDP：切训练样本或训练状态
-TP：切每层矩阵
-PP：切模型层
-```
-
-Megatron-LM 进一步支持 CP、EP 等维度。device mesh 给每个 rank 坐标，例如 `(dp, pp, tp)`，每类 collective 只在对应维度 group 内发生。
+给 rank 写出 `(dp, pp, tp)` 坐标，再为每个维度列成员，能检查是否有错误交叉。长序列和 MoE 增加的维度要遵循框架分组约束，不能只做卡数乘法。
 
 ## 为什么节点内优先 TP
 
-TP 每层通信，最需要低延迟高带宽。因此通常先把 TP group 放在同一 NVLink/NVSwitch 域，再把 PP 或 DP 扩到节点间。具体仍取决于硬件拓扑和模型形状。
+TP 经常在层内交换，频率较高，通常更依赖低延迟高速链路。让这种组留在同一快互联域，再把其他维度跨节点扩展，是常见起点，但仍需结合矩阵大小与设备拓扑测试。
 
-如果 scheduler 把一个 TP group 的 Pod 分散到普通网络节点，程序可能能启动，但性能严重下降。
+调度器若只满足张数而把必要参与者放到慢链路两端，程序可能正确运行却明显变慢。作业提交应表达拓扑需求，而非仅依靠 rank 编号。
 
 ## Pipeline Bubble
 
-PP stage 必须等待前一 stage 的激活。用多个 micro-batch 交错可填流水线，但开始和结束仍有空泡。stage 计算不均衡时，最慢 stage 决定节拍。
+stage 只能在前置激活可用后执行。多个 micro-batch 可以交错前进，起步与收尾仍有空闲；计算最慢的 stage 还会决定持续节拍。
 
-优化方向：
-
-- 平衡每个 stage 的层与计算；
-- 增加合理 micro-batch 数；
-- 使用 1F1B 等 schedule；
-- 避免某 stage 独占 embedding 或 loss 的额外开销；
-- 监控每 stage 时间，而非只看全局 step。
+优化时检查实际 stage 时间、跨界传输和调度策略。层数均分不等于耗时均分，输出头或特殊层可能使某一 stage 成为瓶颈。
 
 ### 流水线空泡不是 GPU 没有被分到任务
 
-只看两个等时 stage 的 forward：一个 micro-batch 需要两段时间，各卡只忙其中一段。四个 micro-batch 流水执行，A 在第 1 至 4 段处理，B 在第 2 至 5 段处理，总共五段，每卡忙四段，理想利用率为 80%。真实训练还有反向、通信和调度依赖，不能照搬这个比例，但它说明增加 micro-batch 怎样摊薄起止空泡。
+仅考虑三个等时 stage 的前向流水线，六个 micro-batch 需要八段时间才能全部通过。每个 stage 忙六段，理想忙碌比例为 75%。卡已经分配成功，空泡来自依赖。
 
-因此 PP 利用率与 micro-batch 数、stage 平衡和 schedule 相关。只看集群给齐了多少卡，无法判断流水线是否填满；还要查看每个 stage 的计算与空闲时间。
+真实训练还包括反向、调度和通信，这个比例不能直接预测。它仅说明增加 micro-batch 可摊薄起止成本，也说明应观察执行泳道而非只看资源占有。
 
 ## CPU Offload 的真实代价
 
-把参数或 optimizer state 放到 CPU 可省 GPU 显存，但通过 PCIe 搬运。若搬运不能与计算重叠，GPU 会等待。CPU 内存带宽、NUMA、pinned memory 和网络也成为系统部分。
+把某些状态放到主机可以减小设备常驻空间，但数据要经过主机内存和 PCIe 等路径。若所需状态未能及时搬回，设备会停等；NUMA、固定页内存和同时进行的数据加载也会影响结果。
 
-Offload 是容量方案，不是免费扩容。
+因此 offload 是转移容量需求的方案。实验必须同时记录设备节省、CPU 占用、传输量和步骤延迟，不能把 CPU 当作无成本的显存延伸。
 
 ## 选型顺序
 
-1. 用 activation checkpointing 处理激活峰值。
-2. 用 FSDP/ZeRO 分片训练状态。
-3. 模型单层或算子仍太大时引入 TP。
-4. 整体层数继续扩展时引入 PP。
-5. 长序列或 MoE 再考虑 CP/EP。
-6. 每增加一维，都用 profile 确认通信与空泡。
+依据占用主项选择最少复杂度的候选：激活峰值先尝试合适重算或输入形状调整，长期状态考虑分片，单层难以容纳时研究 TP，层序列扩展时研究 PP。CP 与 EP 则需要对应的长序列或专家结构需求。
 
-这个顺序不是定律，但避免一开始就构造难以调试的五维并行。
+这是一条排查路线，不是强制算法。每增加一维，都应保留较简单方案的对照，并证明新增通信与运维成本有实际收益。
 
 ### 怎样让并行选择成为可解释的实验
 
-先确认 OOM 主项，激活大则试重算，长期训练状态大则试分片；单层仍过大再研究 TP，层数扩展再研究 PP。每次保留更简单对照，记录峰值、通信字节和 step 时间。
+写下假设，例如“optimizer 状态主导，分片应降低常驻而增加通信”。固定数据和 global batch，测常驻、峰值、通信与有效吞吐。若结果不符，先检查实际启用路径与被遗漏的 buffer。
 
-offload 把问题转移到 CPU 内存与 PCIe，若搬运不可重叠，节省显存的同时会增加等待。复杂 mesh 能扩大容量，但故障定位与 checkpoint reshard 也更难，应计入运维成本。
+同时演练当前 mesh 的 checkpoint 保存和恢复。能完成一次高吞吐运行，却无法在故障后重新放置状态，仍不是可靠训练方案。
 
 ## 源码入口
 
-- `torchtitan/distributed/`
-- `torchtitan/models/*/parallelize.py`
-- `megatron/core/parallel_state.py`
-- `megatron/core/pipeline_parallel/`
-- `megatron/core/distributed/`
+TorchTitan 的并行组织可查 `torchtitan/distributed/` 和模型对应的 `torchtitan/models/*/parallelize.py`。Megatron 侧先看 `megatron/core/parallel_state.py`，再按问题进入 `megatron/core/pipeline_parallel/` 或 `megatron/core/distributed/`。阅读顺序应从组成员和数据归属出发，再到具体通信实现。

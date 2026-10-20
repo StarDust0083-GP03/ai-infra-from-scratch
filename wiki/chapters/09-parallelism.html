@@ -1,82 +1,41 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>多卡不是一个开关 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 09</div><div class="rail-title">多卡不是一个开关</div><ol><li><a href="#数据并行-dp">数据并行 DP</a></li><li><a href="#张量并行-tp">张量并行 TP</a></li><li><a href="#流水线并行-pp">流水线并行 PP</a></li><li><a href="#上下文并行-cp">上下文并行 CP</a></li><li><a href="#专家并行-ep">专家并行 EP</a></li><li><a href="#并行可以组合">并行可以组合</a></li><li><a href="#一个-8-卡例子">一个 8 卡例子</a></li><li><a href="#推理与训练的同名差异">推理与训练的同名差异</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 09 章</div><h1>多卡不是一个开关</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>模型装不下一张卡，或一张卡吞吐不够时，需要切分工作。切分方向不同，省下的显存、产生的通信和适合的拓扑都不同。</p>
-<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 470" role="img" aria-label="数据、张量、流水线、上下文和专家并行的切分方向">
-<text x="40" y="38" class="eyebrow">FIVE DIRECTIONS TO SPLIT WORK</text>
-<g class="box"><rect x="40" y="72" width="250" height="100" rx="4"/><rect x="325" y="72" width="250" height="100" rx="4"/><rect x="610" y="72" width="250" height="100" rx="4"/><rect x="182" y="220" width="250" height="100" rx="4"/><rect x="467" y="220" width="250" height="100" rx="4"/></g>
-<g class="label center"><text x="165" y="105">DP · 数据并行</text><text x="450" y="105">TP · 张量并行</text><text x="735" y="105">PP · 流水线并行</text><text x="307" y="253">CP · 上下文并行</text><text x="592" y="253">EP · 专家并行</text></g>
-<g class="small center"><text x="165" y="136">复制模型，切 batch</text><text x="450" y="136">切一层里的矩阵</text><text x="735" y="136">切不同层</text><text x="307" y="284">切长序列</text><text x="592" y="284">切 MoE experts</text></g>
-<g class="box soft"><rect x="40" y="370" width="820" height="58" rx="4"/></g><text x="450" y="405" text-anchor="middle" class="label">显存省在哪里，通信就会出现在哪里。</text>
-</svg><figcaption>图：五种常见并行切分的是不同维度。</figcaption></figure>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 09</div><div class="rail-title">多卡不是一个开关</div><ol><li><a href="#数据并行-dp">数据并行 DP</a></li><li><a href="#张量并行-tp">张量并行 TP</a></li><li><a href="#流水线并行-pp">流水线并行 PP</a></li><li><a href="#上下文并行-cp">上下文并行 CP</a></li><li><a href="#专家并行-ep">专家并行 EP</a></li><li><a href="#并行可以组合">并行可以组合</a></li><li><a href="#一个-8-卡例子">一个 8 卡例子</a></li><li><a href="#推理与训练的同名差异">推理与训练的同名差异</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 09 章</div><h1>多卡不是一个开关</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>夜间校对模型装不进一张卡，白天问答又需要更多吞吐。这是两类需求：前者可能要拆开一个模型，后者可能只要复制更多独立副本。先确定切分对象，才能知道哪些卡必须共同参与同一步。</p>
+<figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 435" role="img" aria-label="不同切分，改变不同的数据归属"><title>不同切分，改变不同的数据归属</title><rect width="960" height="435" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">不同切分，改变不同的数据归属</text><text x="30" y="93" font-size="18" fill="#245d79" text-anchor="start">切分</text><text x="150" y="93" font-size="18" fill="#245d79" text-anchor="start">分给谁</text><text x="420" y="93" font-size="18" fill="#245d79" text-anchor="start">逻辑关系</text><text x="690" y="93" font-size="18" fill="#245d79" text-anchor="start">主要交接</text><path d="M30 154 L930 154" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="135" font-size="18" fill="#202b32" text-anchor="start">DP</text><text x="150" y="135" font-size="18" fill="#202b32" text-anchor="start">不同请求 / 样本</text><text x="420" y="135" font-size="18" fill="#202b32" text-anchor="start">模型副本</text><text x="690" y="135" font-size="18" fill="#202b32" text-anchor="start">训练梯度同步</text><path d="M30 209 L930 209" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="190" font-size="18" fill="#202b32" text-anchor="start">TP</text><text x="150" y="190" font-size="18" fill="#202b32" text-anchor="start">一层内矩阵片段</text><text x="420" y="190" font-size="18" fill="#202b32" text-anchor="start">同一请求协作</text><text x="690" y="190" font-size="18" fill="#202b32" text-anchor="start">层内结果交换</text><path d="M30 264 L930 264" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="245" font-size="18" fill="#202b32" text-anchor="start">PP</text><text x="150" y="245" font-size="18" fill="#202b32" text-anchor="start">不同层区间</text><text x="420" y="245" font-size="18" fill="#202b32" text-anchor="start">激活依次前进</text><text x="690" y="245" font-size="18" fill="#202b32" text-anchor="start">stage 边界传输</text><path d="M30 319 L930 319" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="300" font-size="18" fill="#202b32" text-anchor="start">CP</text><text x="150" y="300" font-size="18" fill="#202b32" text-anchor="start">不同序列位置</text><text x="420" y="300" font-size="18" fill="#202b32" text-anchor="start">跨位置注意力</text><text x="690" y="300" font-size="18" fill="#202b32" text-anchor="start">注意力信息</text><path d="M30 374 L930 374" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="355" font-size="18" fill="#202b32" text-anchor="start">EP</text><text x="150" y="355" font-size="18" fill="#202b32" text-anchor="start">不同专家</text><text x="420" y="355" font-size="18" fill="#202b32" text-anchor="start">token 按 router 分发</text><text x="690" y="355" font-size="18" fill="#202b32" text-anchor="start">定向收发 / AllToAll</text></g></svg>
+<figcaption>图：用工作归属矩阵区分切数据、切矩阵、切层、切序列和切专家；每行标出需要交换的内容。</figcaption></figure>
 
 <h2 id="数据并行-dp">数据并行 DP<a class="anchor" href="#数据并行-dp" aria-label="链接到本节">#</a></h2>
-<p>每组 GPU 拥有完整模型，处理不同数据。</p>
-<ul>
-<li>推理：多个副本服务不同请求，扩大总吞吐；</li>
-<li>训练：每卡处理不同 micro-batch，再同步梯度；</li>
-<li>优点：概念简单，副本间热路径可相对独立；</li>
-<li>约束：单副本仍要装下模型，训练还要同步梯度。</li>
-</ul>
-<p>在线服务的“4 个副本”通常属于 DP 思路，不代表一次请求使用 4 卡。</p>
+<p>不同副本处理不同样本或请求。在线推理时，副本通常独立完成自己的请求，主要扩大总服务能力；同步训练时，各副本在更新前还要对梯度达成一致。</p>
+<p>每个未分片副本仍需完整模型。因此增加 DP 不能解决单份模型装不下的问题，训练中还要为梯度同步付出通信成本。</p>
 <h2 id="张量并行-tp">张量并行 TP<a class="anchor" href="#张量并行-tp" aria-label="链接到本节">#</a></h2>
-<p>把一层里的大矩阵按行或列切到多卡。每层都可能需要 AllReduce 或 AllGather。</p>
-<ul>
-<li>解决单卡装不下或单卡计算不足；</li>
-<li>通信频繁，适合节点内高速 NVLink/NVSwitch；</li>
-<li>TP 度过大时，每卡矩阵变小，通信与 launch 开销占比上升；</li>
-<li>head 数、hidden size 等通常要能被 TP 度整除。</li>
-</ul>
+<p>把同一层的矩阵运算拆给多个参与者。每张卡产生完整逻辑结果的一部分，中间需要按算子布局进行归约或收集。它减少部分每卡权重和计算，却增加频繁的层内通信。</p>
+<p>矩阵尺寸、注意力头和 kernel 对划分有具体要求。TP 越大，每张卡的工作可能越小，通信与启动成本占比反而升高，因此不是越多越快。</p>
 <h3 id="两卡切矩阵-与两卡各跑请求有什么不同">两卡切矩阵，与两卡各跑请求有什么不同<a class="anchor" href="#两卡切矩阵-与两卡各跑请求有什么不同" aria-label="链接到本节">#</a></h3>
-<p>假设矩阵 W 按输出列切成 W1、W2，两卡读取同一输入，得到不同输出片段，再按后续计算要求拼接或通信。一次请求需要两卡配合，这是 TP。两卡各持完整 W，分别接不同用户，则是副本式 DP，不需要把一次结果拼起来。</p>
-<p>因此增加副本主要扩大总吞吐，TP 主要改变单副本容量与执行路径。把已有四卡服务改成四个副本，前提是每张卡都能容纳完整模型与运行状态。</p>
+<p>设输入长度为 6，矩阵输出宽度为 10。把输出列切成两组，每卡得到宽度 5 的结果，后续计算需要按布局组合，单个请求离不开双方。若两卡都保留完整宽度 10 的矩阵，各处理不同日志，则是独立副本。</p>
+<p>故障影响也不同：前者丢一张卡会破坏这个逻辑副本，后者通常只损失一个独立服务者。部署与健康检查要按实际副本边界设计。</p>
 <h2 id="流水线并行-pp">流水线并行 PP<a class="anchor" href="#流水线并行-pp" aria-label="链接到本节">#</a></h2>
-<p>把不同层放到不同 stage，激活沿 stage 传递。</p>
-<ul>
-<li>每卡只保存部分层；</li>
-<li>通信频率比层内 TP 低，但存在 pipeline bubble；</li>
-<li>推理单请求要依次经过所有 stage，延迟增加；</li>
-<li>micro-batch 和 stage 平衡决定利用率。</li>
-</ul>
-<p>节点间互联较慢时，PP 有时比跨节点 TP 更合适，因为传输的是 stage 边界激活，而不是每层 collective。</p>
+<p>把层划为多个 stage，激活依次传递。每个 stage 只保留自己的层，但单条数据仍要经过完整顺序。多个 micro-batch 可交错填流水线，开始和结束阶段仍会有空泡。</p>
+<p>选择 stage 时既看参数大小，也看实际计算耗时。均分层数不保证均分工作，嵌入、输出头和不同层结构都可能造成失衡。</p>
 <h2 id="上下文并行-cp">上下文并行 CP<a class="anchor" href="#上下文并行-cp" aria-label="链接到本节">#</a></h2>
-<p>把长序列维度分到多卡，解决单卡 attention 激活或 KV 压力。它需要处理 attention 的跨卡信息交换，适合超长上下文训练和特定推理场景。</p>
+<p>超长序列可以沿位置维度拆分，使每个参与者保存或计算部分序列。注意力仍需获得跨分片的信息，因此需要专门交换与计算组织。它并非把一句话机械拆成几个互不相关的小问题。</p>
+<p>具体能减少哪些激活或 KV、怎样通信，要核对目标框架和模型实现，不应凭名称推导全部状态都均分。</p>
 <h2 id="专家并行-ep">专家并行 EP<a class="anchor" href="#专家并行-ep" aria-label="链接到本节">#</a></h2>
-<p>MoE 模型只激活部分 experts。EP 把专家分到不同卡，token 通过 AllToAll 路由到目标专家。</p>
-<p>性能依赖 token 分布是否均衡。某些专家过热会让其他 GPU 等待，所以 router load balance 是基础设施问题，也是模型问题。</p>
+<p>MoE 将专家分布到不同设备，router 决定 token 发往哪些专家，执行后再组合结果。常见传输涉及 AllToAll 类型的数据分发。</p>
+<p>如果很多 token 集中到少数专家，某些设备会成为热点，其他设备即使有空也要等待。容量评估应包含实际路由分布与失衡，而非只用平均专家负载。</p>
 <h2 id="并行可以组合">并行可以组合<a class="anchor" href="#并行可以组合" aria-label="链接到本节">#</a></h2>
-<p>一个大训练任务可能写成：</p>
-<pre><code class="language-text">world_size = DP × TP × PP × CP × EP
-</code></pre>
-<p>并非所有维度都独立，实际框架会构造多维 device mesh。选择顺序通常先考虑：</p>
-<ol>
-<li>单卡能否装下；</li>
-<li>节点内有哪些高速互联；</li>
-<li>节点间带宽和延迟；</li>
-<li>模型结构是否 MoE、是否长上下文；</li>
-<li>batch 是否足够填满 pipeline 和 DP。</li>
-</ol>
+<p>简单的 DP、TP、PP 布局可用三个坐标表达。例如 <code>(数据副本, stage, 张量分片)</code> 确定一个 rank 的职责。长序列和 MoE 加入后，维度的依赖与分组规则由框架决定，不能不加条件地相乘所有缩写。</p>
+<p>先列每张卡保存哪些参数、处理哪些样本，再列它属于哪些通信组。随后把这些组映射到节点内外的真实链路。</p>
 <h3 id="device-mesh-的坐标决定谁和谁通信">device mesh 的坐标决定谁和谁通信<a class="anchor" href="#device-mesh-的坐标决定谁和谁通信" aria-label="链接到本节">#</a></h3>
-<p>以 DP=2、PP=2、TP=2 的简化八卡布局为例，每个 rank 有三个坐标。TP 通信发生在同一 DP、PP 坐标内，PP 传输连接相邻 stage，DP 同步连接对应模型部分。编号相邻不必然表示物理互联最好，还要映射真实拓扑。</p>
-<p>CP 与 EP 的组合在不同框架中可能共享或依赖其他维度，不能无条件将五个参数相乘当作 GPU 数。先理解每个 group 的成员与数据归属，再核对框架的 mesh 规则。</p>
+<p>假设 DP=2、TP=2，每个副本内部的两卡执行层内通信，两个副本中对应分片还可能在训练中同步。编号连续只是命名，不能保证物理上相邻。</p>
+<p>把频繁通信的 TP 组放到快链路内通常更合理，但仍要实测。设备数量满足乘积只是必要条件，拓扑和显存峰值同样约束布局。</p>
 <h2 id="一个-8-卡例子">一个 8 卡例子<a class="anchor" href="#一个-8-卡例子" aria-label="链接到本节">#</a></h2>
-<p>如果 70B 权重 FP16 约 130 GiB，单张 80 GiB 卡放不下。可在一个 8 卡节点使用 TP=2 或 TP=4，让每卡只保存部分权重，再视吞吐需要复制 DP 组。</p>
-<p>但不能只做除法。还要给 KV、workspace 和通信 buffer 留空间，并检查每层 collective 是否被互联支持。</p>
+<p>考虑教学模型含 180 亿参数，16 位权重下界约 33.53 GiB，目标卡各有 24 GiB。单卡放不下，理想 TP=2 时每卡权重约 16.76 GiB，剩余还要容纳缓存与工作区。</p>
+<p>八张卡可以候选组成四个两卡副本，但这只是待测试布局。若组内互联差，或长输入峰值超过余额，仍需调整并行、精度或负载。图中的八卡不对应特定产品。</p>
 <h2 id="推理与训练的同名差异">推理与训练的同名差异<a class="anchor" href="#推理与训练的同名差异" aria-label="链接到本节">#</a></h2>
-<p>TP、PP 在两者中概念相近，但调度目标不同：</p>
-<ul>
-<li>训练追求稳定大 batch 吞吐，通信形状规律；</li>
-<li>在线推理 batch 动态、序列长度不同，还要管理 KV；</li>
-<li>训练 PP 用 micro-batch 填流水线，推理 PP 要考虑逐 token latency。</li>
-</ul>
-<p>不要把训练 benchmark 的并行配置直接复制到在线服务。</p>
+<p>训练往往用规律 micro-batch 持续执行，在线服务则不断接入、退出和改变长度，还要保护用户延迟。相同 TP 和 PP 名称不会使两者拥有相同最佳参数。</p>
+<p>训练可用许多 micro-batch 填流水线；在线单请求的每个生成位置都需经过各 stage，其逐 token 延迟可能不理想。应分别评估吞吐与单请求体验。</p>
 <h3 id="只做权重除法会漏掉通信和峰值">只做权重除法会漏掉通信和峰值<a class="anchor" href="#只做权重除法会漏掉通信和峰值" aria-label="链接到本节">#</a></h3>
-<p>130 GiB 权重切到两卡，理想每卡约 65 GiB，还要留 KV、workspace 与通信 buffer。TP 也不是保证每个 tensor 都严格均分，一些状态可能复制。模型能加载只证明容量第一关通过，接下来应测长上下文和多请求峰值。</p>
-<p>多卡变慢时分别看每卡计算是否太小、每层通信是否昂贵以及 stage 是否空闲，避免再增加卡数放大同一瓶颈。</p>
+<p>上例每卡 16.76 GiB 只是理想权重分摊。某些参数或状态可能复制，层内归约还需 buffer，缓存能否均分也依赖实现。加载成功后，还需测长上下文、批次峰值与必要 collective 的时间。</p>
+<p>若增加卡后更慢，检查每卡工作是否变得过小、通信频率是否过高，或 stage 是否不平衡。继续增加同类资源可能放大原来的等待。</p>
 <h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
-<ul>
-<li><code>megatron/core/parallel_state.py</code></li>
-<li><code>megatron/core/tensor_parallel/</code></li>
-<li><code>megatron/core/pipeline_parallel/</code></li>
-<li><code>torchtitan/distributed/parallel_dims.py</code></li>
-<li><code>vllm/distributed/</code></li>
-</ul>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="08-loading-quantization.html"><small>上一章</small><strong>模型加载、精度与量化</strong></a><a class="next" href="10-collectives.html"><small>下一章</small><strong>Collective：GPU 之间怎样交换数据</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>在 <code>megatron/core/parallel_state.py</code> 追进程组构造，在 <code>megatron/core/tensor_parallel/</code> 与 <code>megatron/core/pipeline_parallel/</code> 看实际工作划分。TorchTitan 的维度说明位于 <code>torchtitan/distributed/parallel_dims.py</code>，推理组管理可从 <code>vllm/distributed/</code> 查起。带着一组具体 rank 坐标阅读，核对每次通信的参与者。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="08-loading-quantization.html"><small>上一章</small><strong>模型加载、精度与量化</strong></a><a class="next" href="10-collectives.html"><small>下一章</small><strong>Collective：GPU 之间怎样交换数据</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

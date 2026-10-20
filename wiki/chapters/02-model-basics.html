@@ -1,111 +1,72 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>最少模型知识：token、tensor 与参数 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 02</div><div class="rail-title">最少模型知识：token、tensor 与参数</div><ol><li><a href="#token-不是字-也不是固定长度">Token 不是字，也不是固定长度</a></li><li><a href="#tensor-是带形状的数字数组">Tensor 是带形状的数字数组</a></li><li><a href="#参数是模型长期保存的-tensor">参数是模型长期保存的 tensor</a></li><li><a href="#数据类型决定字节和数值范围">数据类型决定字节和数值范围</a></li><li><a href="#层-头和隐藏维度">层、头和隐藏维度</a></li><li><a href="#batch-有两种含义">Batch 有两种含义</a></li><li><a href="#flop-与-byte-是两本账">FLOP 与 byte 是两本账</a></li><li><a href="#一个练习">一个练习</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 02 章</div><h1>最少模型知识：token、tensor 与参数</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>AI Infra 不要求先会推导注意力公式，但必须能读懂数据形状。显存和通信量最终都来自“有多少个元素，每个元素几字节”。</p>
-<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 330" role="img" aria-label="token、向量、矩阵和批次的关系">
-<text x="40" y="38" class="eyebrow">FROM TEXT TO TENSORS</text>
-<g class="box"><rect x="40" y="82" width="175" height="90" rx="4"/><rect x="270" y="82" width="150" height="90" rx="4"/><rect x="475" y="82" width="175" height="90" rx="4"/><rect x="705" y="82" width="155" height="90" rx="4"/></g>
-<g class="label"><text x="128" y="116" text-anchor="middle">文字</text><text x="128" y="143" text-anchor="middle" class="small">“GPU 很忙”</text><text x="345" y="116" text-anchor="middle">Token IDs</text><text x="345" y="143" text-anchor="middle" class="mono">[41, 908, 7]</text><text x="562" y="116" text-anchor="middle">Embedding</text><text x="562" y="143" text-anchor="middle" class="small">3 × hidden_size</text><text x="782" y="116" text-anchor="middle">Batch Tensor</text><text x="782" y="143" text-anchor="middle" class="small">B × S × H</text></g>
-<g class="flow"><path d="M215 127H270"/><path d="M420 127H475"/><path d="M650 127H705"/></g>
-<text x="40" y="230" class="label">只记三个字母</text><g class="box soft"><rect x="40" y="252" width="820" height="50" rx="4"/></g><text x="95" y="283" class="mono accent">B</text><text x="120" y="283" class="small">batch size</text><text x="345" y="283" class="mono accent">S</text><text x="370" y="283" class="small">sequence length</text><text x="640" y="283" class="mono accent">H</text><text x="665" y="283" class="small">hidden size</text>
-</svg><figcaption>图：文字先变成 token ID，再变成带 batch、sequence 和 hidden 三个维度的 tensor。</figcaption></figure>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 02</div><div class="rail-title">最少模型知识：token、tensor 与参数</div><ol><li><a href="#token-不是字-也不是固定长度">Token 不是字，也不是固定长度</a></li><li><a href="#tensor-是带形状的数字数组">Tensor 是带形状的数字数组</a></li><li><a href="#参数是模型长期保存的-tensor">参数是模型长期保存的 tensor</a></li><li><a href="#数据类型决定字节和数值范围">数据类型决定字节和数值范围</a></li><li><a href="#层-头和隐藏维度">层、头和隐藏维度</a></li><li><a href="#batch-有两种含义">Batch 有两种含义</a></li><li><a href="#flop-与-byte-是两本账">FLOP 与 byte 是两本账</a></li><li><a href="#一个练习">一个练习</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 02 章</div><h1>最少模型知识：token、tensor 与参数</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>把一批档案送进模型前，需要回答两个量化问题：要处理多少位置，每个位置存多少数。模型术语在容量规划中最终都要落到这两个数量上。</p>
+<figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 390" role="img" aria-label="先数位置，再换算存储"><title>先数位置，再换算存储</title><rect width="960" height="390" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">先数位置，再换算存储</text><text x="30" y="90" font-size="23" fill="#245d79" text-anchor="start">3 份序列 × 512 个位置 × 2048 个数</text><rect x="80" y="138" width="340" height="120" fill="#f2f4f0" stroke="#245d79"/><rect x="98" y="156" width="340" height="120" fill="#f2f4f0" stroke="#245d79"/><rect x="116" y="174" width="340" height="120" fill="#f2f4f0" stroke="#245d79"/><text x="180" y="265" font-size="20" fill="#202b32" text-anchor="start">[3, 512, 2048]</text><path d="M470 210 L560 210" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="560.0,210.0 550.8,213.9 550.8,206.1" fill="#245d79"/><text x="590" y="160" font-size="23" fill="#202b32" text-anchor="start">3,145,728 个元素</text><text x="590" y="215" font-size="20" fill="#245d79" text-anchor="start">BF16：× 2 bytes = 6 MiB</text><text x="590" y="260" font-size="20" fill="#a14929" text-anchor="start">FP32：× 4 bytes = 12 MiB</text><text x="35" y="350" font-size="19" fill="#202b32" text-anchor="start">形状决定数量；类型决定每元素空间。这里只计算一份 tensor。</text></g></svg>
+<figcaption>图：三份档案各取 512 个位置，每位置 2048 个数；先数元素，再按精度换算字节。</figcaption></figure>
 
 <h2 id="token-不是字-也不是固定长度">Token 不是字，也不是固定长度<a class="anchor" href="#token-不是字-也不是固定长度" aria-label="链接到本节">#</a></h2>
-<p>Tokenizer 把文本切成词片段并映射为整数 ID。同一句中文在不同模型中可能产生不同 token 数。基础设施关心 token，因为：</p>
-<ul>
-<li>prompt token 数决定 prefill 工作量；</li>
-<li>总上下文 token 数决定 KV cache；</li>
-<li>output token 数决定 decode 轮数；</li>
-<li>计费、限流和吞吐常用 token 表示。</li>
-</ul>
-<p>字符长度只能做粗略预估，真正入队前应以目标 tokenizer 计算。</p>
+<p>同样一份带旧地名、数字和标点的航海日志，不同 tokenizer 可能给出不同数量的 ID。按字符数设置输入限额只是入口保护，实际计算与计费应使用目标 tokenizer 的结果，包括聊天模板带来的额外位置。</p>
+<p>输入 token 影响读取工作，输出 token 影响生成轮数，已经保留的位置影响 KV 占用。容量记录至少应把输入与输出分列；“总长相同”的两种请求不一定有相同延迟。</p>
 <h2 id="tensor-是带形状的数字数组">Tensor 是带形状的数字数组<a class="anchor" href="#tensor-是带形状的数字数组" aria-label="链接到本节">#</a></h2>
-<p>常见形状记成：</p>
-<pre><code class="language-text">[B, S, H]
-</code></pre>
-<ul>
-<li><code>B</code>：batch 中有多少条序列；</li>
-<li><code>S</code>：每条序列有多少 token；</li>
-<li><code>H</code>：每个 token 的隐藏向量长度。</li>
-</ul>
-<p>例如 <code>[8, 2048, 4096]</code> 的 FP16 tensor 包含 <code>8 × 2048 × 4096</code> 个元素，每个元素 2 bytes，约 128 MiB。还没算任何临时结果。</p>
+<p><code>[B, S, H]</code> 可以表示 B 份序列、每份 S 个位置、每位置 H 个隐藏数值。取 <code>[3, 512, 2048]</code>，共有 3,145,728 个元素。这里的三个维度描述一份中间结果，不等于模型拥有这些参数。</p>
 <h3 id="形状先决定元素数-精度再决定字节数">形状先决定元素数，精度再决定字节数<a class="anchor" href="#形状先决定元素数-精度再决定字节数" aria-label="链接到本节">#</a></h3>
-<p>把 <code>[8, 2048, 4096]</code> 看成八份序列，每份有 2048 个位置，每个位置有 4096 个数。三个维度相乘得到 67,108,864 个元素，乘 FP16 的 2 bytes 得到 134,217,728 bytes，也就是 128 MiB。若只改为 FP32，元素不变，空间变成 256 MiB。</p>
-<p>这是一份 tensor 的账，不是模型全部激活。每层还有其他中间结果，算子可能保留或重用内存；形状算例提供量级起点，不应把它直接乘层数当成准确峰值。</p>
+<p>这份结果若使用 BF16，每元素 2 bytes，共 6,291,456 bytes，即 6 MiB；若改存 FP32，则为 12 MiB。换精度没有改变形状，增加序列长度才会改变位置数。</p>
+<p>真实执行还可能存在转置、打包或临时副本。用形状乘元素字节数可求逻辑内容下界，要估峰值，还需确认这些副本是否同时活着，不能只看最后留下的那份结果。</p>
 <h2 id="参数是模型长期保存的-tensor">参数是模型长期保存的 tensor<a class="anchor" href="#参数是模型长期保存的-tensor" aria-label="链接到本节">#</a></h2>
-<p>“7B 模型”通常表示约 70 亿个参数。只看权重下界：</p>
-<pre><code class="language-text">权重字节 = 参数量 × 每参数字节
-</code></pre>
-<p>70 亿参数使用 FP16 或 BF16：</p>
-<pre><code class="language-text">7,000,000,000 × 2 bytes ≈ 13.04 GiB
-</code></pre>
-<p>这不等于一张 16 GiB 卡一定能运行，因为框架、KV cache、workspace 和临时 tensor 也要显存。</p>
+<p>假设教学模型含 30 亿参数，按 16 位保存，权重下界为 <code>3e9 * 2 / 2**30</code>，约 5.59 GiB。请求变短并不会让这份权重同步缩小。</p>
+<p>检查模型配置和权重文件比只看“3B”标签可靠。嵌入是否共享、量化元数据和保留高精度的层都会改变实际加载大小。文件在磁盘上的尺寸也不能直接替代运行时峰值。</p>
 <h2 id="数据类型决定字节和数值范围">数据类型决定字节和数值范围<a class="anchor" href="#数据类型决定字节和数值范围" aria-label="链接到本节">#</a></h2>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
-<th>类型</th>
-<th align="right">常见字节</th>
-<th>用途直觉</th>
+<th>表示</th>
+<th align="right">内容空间下界</th>
+<th>规划时还要问什么</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>FP32</td>
-<td align="right">4</td>
-<td>精度高，训练部分状态常保留</td>
+<td align="right">4 bytes / 数</td>
+<td>哪些累加与状态需要保留它</td>
 </tr>
 <tr>
-<td>FP16</td>
-<td align="right">2</td>
-<td>范围较窄，需要关注溢出</td>
-</tr>
-<tr>
-<td>BF16</td>
-<td align="right">2</td>
-<td>指数范围接近 FP32，训练常见</td>
+<td>BF16、FP16</td>
+<td align="right">2 bytes / 数</td>
+<td>指数范围和舍入是否适合任务</td>
 </tr>
 <tr>
 <td>FP8</td>
-<td align="right">1</td>
-<td>需硬件和缩放策略支持</td>
+<td align="right">1 byte / 数</td>
+<td>是否有匹配硬件、缩放与 kernel</td>
 </tr>
 <tr>
 <td>INT8</td>
-<td align="right">1</td>
-<td>推理量化常见</td>
+<td align="right">1 byte / 数</td>
+<td>缩放粒度与校准如何设置</td>
 </tr>
 <tr>
 <td>INT4</td>
-<td align="right">0.5</td>
-<td>权重更小，但打包与 kernel 有要求</td>
+<td align="right">半 byte / 数</td>
+<td>如何打包，额外元数据多大</td>
 </tr>
 </tbody></table></div>
-<p>“每参数 0.5 byte”是逻辑下界。量化 scale、zero point、对齐和打包会增加元数据。</p>
+<p>半 byte 是逻辑记账方式，设备不必逐个半字节访问。低比特格式往往成组存储，并带尺度信息，实际字节数会高于这个下界。</p>
 <h3 id="参数量与请求长度分别让哪部分变大">参数量与请求长度分别让哪部分变大<a class="anchor" href="#参数量与请求长度分别让哪部分变大" aria-label="链接到本节">#</a></h3>
-<p>同一 7B 模型接收短句或长文，长期权重通常不变；变的是输入 tensor、计算量和历史 KV。换更大的模型会增加权重，而增加并发会增加同时存在的运行状态。于是“显存满了”要先判断到底改变了模型还是请求。</p>
-<p>FP16 和 BF16 都占 2 bytes，却有不同数值范围与精度。字节数相同不表示训练稳定性相同；部署精度是一份数值与 kernel 合同，容量公式只解释其中的存储部分。</p>
+<p>同一个模型回答一句目录查询与处理整卷日志，权重不变，输入处理和历史状态不同。把模型换大则首先改变权重与每步计算；提高同时在线人数则增加并存的请求状态。定位显存增长时应记录究竟是哪一个维度发生了变化。</p>
+<p>BF16 与 FP16 的存储尺寸相等，但可表达的范围不同。容量相同并不能推导出数值行为相同，精度切换后仍需检查溢出、异常值和任务输出。</p>
 <h2 id="层-头和隐藏维度">层、头和隐藏维度<a class="anchor" href="#层-头和隐藏维度" aria-label="链接到本节">#</a></h2>
-<p>对 KV cache 估算，三个结构参数很重要：</p>
-<ul>
-<li>层数 <code>L</code>；</li>
-<li>KV head 数 <code>Hkv</code>；</li>
-<li>每个 head 的维度 <code>Dhead</code>。</li>
-</ul>
-<p>GQA 模型的 KV head 数可能小于 query head 数，因此不能总用 hidden size 直接代替。应读取模型 config。</p>
+<p>注意力会在多层保存 key 和 value。估算缓存时要知道层数、KV head 数以及每头维度。教学模型若有 24 层、4 个 KV head、每头 96 维，不能因为 query head 更多就把 KV head 也填成 query head 数。</p>
+<p>这些值通常可从模型 config 查到。滑动窗口、混合注意力或其他架构可能使缓存规则不同，后文的公式会明确限定为常规全注意力情形。</p>
 <h2 id="batch-有两种含义">Batch 有两种含义<a class="anchor" href="#batch-有两种含义" aria-label="链接到本节">#</a></h2>
-<p>训练 batch 常指一次 optimizer step 处理的样本总数，还可能分成 micro-batch 和梯度累积。推理 batch 更动态，某一轮里活跃序列和处理 token 数都可变化。</p>
-<p>所以“batch size 32”离开上下文没有意义。至少要说明：</p>
-<ul>
-<li>是序列数还是 token 数；</li>
-<li>是每卡还是全局；</li>
-<li>是 prefill 还是 decode；</li>
-<li>是否包含梯度累积。</li>
-</ul>
+<p>训练的一次更新可能累积多个 micro-batch，并由多个数据并行副本共同提供样本。在线推理的一个调度批次，则可能同时包含新输入块和已经开始生成的序列。</p>
+<p>记录“batch 为 12”时，补写单位与范围：12 份样本、12 个活跃序列，还是 12 个 token？是每个数据副本、每卡，还是整个更新？缺少这些说明就无法复算资源需求。</p>
 <h2 id="flop-与-byte-是两本账">FLOP 与 byte 是两本账<a class="anchor" href="#flop-与-byte-是两本账" aria-label="链接到本节">#</a></h2>
-<p>模型执行既做计算，也搬数据。只统计 FLOP 会忽略显存和互联，只统计内存又会忽略 tensor core。后面用 Roofline 心智模型判断哪本账先成为上限。</p>
+<p>一次矩阵计算既要执行运算，也要从存储取数。两种实现即使算出同一结果，也可能有不同的数据搬运量；同一个 kernel 在不同 batch 下又可能有不同复用。运算量除以搬运字节量得到算术强度，下一章据此判断可能的限制。</p>
 <h3 id="在线-batch-不应被理解为整齐的矩形">在线 batch 不应被理解为整齐的矩形<a class="anchor" href="#在线-batch-不应被理解为整齐的矩形" aria-label="链接到本节">#</a></h3>
-<p>八条请求可能已经分别生成 10、200 或 1000 个位置，引擎会用分页、打包和 metadata 表达变长状态。教学 <code>[B,S,H]</code> 帮助读形状，但真实引擎不一定为每条请求补齐相同最大 S。FLOP 统计问做了多少运算，byte 统计问搬了多少数据，两者必须分别估算。</p>
+<p>三位读者当前各保留 70、190 和 510 个位置。引擎可以用变长打包和块表描述它们，不必为每人都分配一个长度 510 的完整矩形。数学符号 <code>[B,S,H]</code> 帮我们理解维度，不能据此断言实际分配一定包含填充后的全部槽位。</p>
 <h2 id="一个练习">一个练习<a class="anchor" href="#一个练习" aria-label="链接到本节">#</a></h2>
-<p>运行：</p>
-<pre><code class="language-bash">python3 examples/infra_lab.py memory --parameters 7 --weight-bits 16
+<p>运行同一组输入，只改变权重精度：</p>
+<pre><code class="language-bash">python3 examples/infra_lab.py memory --parameters 3 --weight-bits 16 --context 6144
+python3 examples/infra_lab.py memory --parameters 3 --weight-bits 8 --context 6144
 </code></pre>
-<p>再把 <code>--weight-bits</code> 改为 8。观察权重减少，但 KV cache 不变，因为它由层、KV head、head dim、活跃 token 和 KV 精度决定。</p>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="01-request-journey.html"><small>上一章</small><strong>一条请求穿过哪些系统</strong></a><a class="next" href="03-gpu-basics.html"><small>下一章</small><strong>GPU 不是更快的 CPU</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>权重下界应减半，KV 项应保持不变。再把上下文改为 12288，检查 KV 项加倍而权重不变。若你的结果不满足这两点，先查参数是否被误用，不急着解释硬件行为。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="01-request-journey.html"><small>上一章</small><strong>一条请求穿过哪些系统</strong></a><a class="next" href="03-gpu-basics.html"><small>下一章</small><strong>GPU 不是更快的 CPU</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

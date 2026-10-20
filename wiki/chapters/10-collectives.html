@@ -1,73 +1,41 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>Collective：GPU 之间怎样交换数据 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 10</div><div class="rail-title">Collective：GPU 之间怎样交换数据</div><ol><li><a href="#四个最常见操作">四个最常见操作</a></li><li><a href="#ring-的直觉">Ring 的直觉</a></li><li><a href="#拓扑比-gpu-数量更重要">拓扑比 GPU 数量更重要</a></li><li><a href="#同步等待">同步等待</a></li><li><a href="#通信量如何影响并行选择">通信量如何影响并行选择</a></li><li><a href="#overlap-不是免费">Overlap 不是免费</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 10 章</div><h1>Collective：GPU 之间怎样交换数据</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>多卡程序不是八个独立进程各算各的。每个 rank 只持有局部数据，需要通过 collective 形成全局结果。NCCL 提供针对 NVIDIA GPU 与互联优化的 collective 实现。</p>
-<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 430" role="img" aria-label="四种常见集体通信的输入输出形状">
-<text x="40" y="38" class="eyebrow">COLLECTIVE COMMUNICATION</text>
-<g class="box"><rect x="40" y="70" width="190" height="128" rx="4"/><rect x="250" y="70" width="190" height="128" rx="4"/><rect x="460" y="70" width="190" height="128" rx="4"/><rect x="670" y="70" width="190" height="128" rx="4"/></g>
-<g class="label center"><text x="135" y="102">AllReduce</text><text x="345" y="102">AllGather</text><text x="555" y="102">ReduceScatter</text><text x="765" y="102">AllToAll</text></g>
-<g class="small center"><text x="135" y="132">每卡输入不同</text><text x="135" y="157">每卡得到同一聚合</text><text x="345" y="132">每卡一个分片</text><text x="345" y="157">每卡得到全部分片</text><text x="555" y="132">先聚合</text><text x="555" y="157">每卡留下一个分片</text><text x="765" y="132">每卡发给所有卡</text><text x="765" y="157">MoE 常见</text></g>
-<path d="M135 225C135 300 765 300 765 225" class="flow"/><path d="M765 315C765 390 135 390 135 315" class="flow"/><text x="450" y="284" text-anchor="middle" class="small">带宽 · 延迟 · 拓扑 · 同步等待</text><text x="450" y="363" text-anchor="middle" class="label accent">collective 不是免费函数调用</text>
-</svg><figcaption>图：不同 collective 规定了每个 rank 输入和输出的数据形状。</figcaption></figure>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 10</div><div class="rail-title">Collective：GPU 之间怎样交换数据</div><ol><li><a href="#四个最常见操作">四个最常见操作</a></li><li><a href="#ring-的直觉">Ring 的直觉</a></li><li><a href="#拓扑比-gpu-数量更重要">拓扑比 GPU 数量更重要</a></li><li><a href="#同步等待">同步等待</a></li><li><a href="#通信量如何影响并行选择">通信量如何影响并行选择</a></li><li><a href="#overlap-不是免费">Overlap 不是免费</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 10 章</div><h1>Collective：GPU 之间怎样交换数据</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>分片后的计算只有局部结果。某一步需要完整参数，另一步只需各方贡献的和，还有一步要把 token 送到不同专家。这些数据关系由 collective 定义，NCCL 等实现负责在设备和链路上高效完成。</p>
+<figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 460" role="img" aria-label="同样输入，四种数据合同"><title>同样输入，四种数据合同</title><rect width="960" height="460" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">同样输入，四种数据合同</text><text x="30" y="90" font-size="21" fill="#202b32" text-anchor="start">输入：rank 0 = [2,7]；rank 1 = [5,1]</text><text x="30" y="153" font-size="20" fill="#202b32" text-anchor="start">sum AllReduce</text><rect x="350" y="125" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="364" y="154" font-size="19" fill="#202b32" text-anchor="start">[7,8]</text><rect x="650" y="125" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="664" y="154" font-size="19" fill="#202b32" text-anchor="start">[7,8]</text><text x="30" y="223" font-size="20" fill="#202b32" text-anchor="start">AllGather</text><rect x="350" y="195" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="364" y="224" font-size="19" fill="#202b32" text-anchor="start">[2,7,5,1]</text><rect x="650" y="195" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="664" y="224" font-size="19" fill="#202b32" text-anchor="start">[2,7,5,1]</text><text x="30" y="293" font-size="20" fill="#202b32" text-anchor="start">ReduceScatter</text><rect x="350" y="265" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="364" y="294" font-size="19" fill="#202b32" text-anchor="start">[7]</text><rect x="650" y="265" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="664" y="294" font-size="19" fill="#202b32" text-anchor="start">[8]</text><text x="30" y="363" font-size="20" fill="#202b32" text-anchor="start">AllToAll</text><rect x="350" y="335" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="364" y="364" font-size="19" fill="#202b32" text-anchor="start">[2,5]</text><rect x="650" y="335" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="664" y="364" font-size="19" fill="#202b32" text-anchor="start">[7,1]</text><text x="380" y="420" font-size="16" fill="#56616b" text-anchor="start">rank 0 输出</text><text x="680" y="420" font-size="16" fill="#56616b" text-anchor="start">rank 1 输出</text></g></svg>
+<figcaption>图：两位参与者输入 [2,7] 与 [5,1]，分别展示相加、拼接、归约后分片和定向交换。</figcaption></figure>
 
 <h2 id="四个最常见操作">四个最常见操作<a class="anchor" href="#四个最常见操作" aria-label="链接到本节">#</a></h2>
 <h3 id="allreduce">AllReduce<a class="anchor" href="#allreduce" aria-label="链接到本节">#</a></h3>
-<p>每个 rank 有一份输入，先做 sum/max 等归约，每个 rank 都得到同一结果。数据并行同步梯度常用。</p>
+<p>每个参与者提供同形状输入，按照约定操作归约，随后每方得到完整归约结果。例如 sum 用于合并梯度贡献。结果是和还是均值，取决于操作与后续缩放，不能从名称直接假定平均。</p>
 <h3 id="allgather">AllGather<a class="anchor" href="#allgather" aria-label="链接到本节">#</a></h3>
-<p>每个 rank 持有一个 shard，交换后每个 rank 得到完整集合。FSDP 在计算某层前组装参数常用。</p>
+<p>各方提供自己的片段，所有参与者获得按顺序组成的集合。它搬运和组合内容，不替你做逐元素加法。分片参数在某些计算前需要这种组装。</p>
 <h3 id="reducescatter">ReduceScatter<a class="anchor" href="#reducescatter" aria-label="链接到本节">#</a></h3>
-<p>先归约，再把结果分片留在各 rank。FSDP 梯度分片常用。它可避免 AllReduce 后每卡保留完整结果。</p>
+<p>先把各方贡献归约，再把结果拆开分给参与者。每方只留一个结果片段，可以避免人人长期保存完整归约内容，常用于分片梯度。</p>
 <h3 id="alltoall">AllToAll<a class="anchor" href="#alltoall" aria-label="链接到本节">#</a></h3>
-<p>每个 rank 都向所有 rank 发送不同部分。MoE token 路由常用，对网络和负载均衡敏感。</p>
+<p>每个源为不同目标准备不同片段，交换后各目标收到来自多个源的数据。MoE token 路由可使用这类关系。输入输出大小和分布规则需要各方匹配，数据偏斜也会影响耗时。</p>
 <h3 id="用两个-rank-区分归约与收集">用两个 rank 区分归约与收集<a class="anchor" href="#用两个-rank-区分归约与收集" aria-label="链接到本节">#</a></h3>
-<p>rank 0 有 <code>[1,2]</code>，rank 1 有 <code>[3,4]</code>。sum AllReduce 后两者都拿到 <code>[4,6]</code>；AllGather 则让两者拿到各自输入组成的集合，没有做相加。ReduceScatter 在相同简化输入下先形成和，再让各 rank 留不同片段，比如分别得到 <code>[4]</code> 与 <code>[6]</code>。</p>
-<p>AllToAll 则可让每个 rank 将输入分成给不同目标的部分，交换后每个目标得到来自各源的片段。操作名规定了数据关系，不是随意交换几个名称就能获得相同结果。</p>
+<p>rank 0 输入 <code>[2,7]</code>，rank 1 输入 <code>[5,1]</code>。sum AllReduce 让双方都得到 <code>[7,8]</code>；AllGather 则得到按 rank 顺序排列的 <code>[2,7,5,1]</code>。</p>
+<p>同样的输入做两等份 ReduceScatter，可使 rank 0 留下 <code>[7]</code>、rank 1 留下 <code>[8]</code>。若按一元素一目标做 AllToAll，rank 0 收到 <code>[2,5]</code>，rank 1 收到 <code>[7,1]</code>。这四种结果足以检查你是否把“收集”和“归约”混用。</p>
 <h2 id="ring-的直觉">Ring 的直觉<a class="anchor" href="#ring-的直觉" aria-label="链接到本节">#</a></h2>
-<p>AllReduce 可以拆成 ReduceScatter 加 AllGather。Ring 算法让每个 rank 只和邻居交换 chunk，多轮后完成聚合与分发。它能较好利用带宽，但轮数随 rank 增加，低延迟小消息可能更适合 tree 等算法。</p>
-<p>NCCL 会依据消息大小、拓扑和配置选择算法与 protocol。应用通常调用语义，不手写环。</p>
+<p>一种 AllReduce 实现先通过多轮交换完成分片归约，再分发已归约片段。环中各参与者主要与邻居传输，适合利用链路带宽，但启动轮数会随参与者数量增长。</p>
+<p>具体算法还可能采用树或其他结构。消息尺寸、拓扑和协议共同影响选择，应用通常声明数据语义，不应把某次内部使用 ring 当成永久 API 合同。</p>
 <h2 id="拓扑比-gpu-数量更重要">拓扑比 GPU 数量更重要<a class="anchor" href="#拓扑比-gpu-数量更重要" aria-label="链接到本节">#</a></h2>
-<p>八张卡可能是：</p>
-<ul>
-<li>同一 NVSwitch 域；</li>
-<li>分属两个 PCIe root complex；</li>
-<li>跨两个节点，经 InfiniBand 或 RoCE；</li>
-<li>网络路径还与其他作业共享。</li>
-</ul>
-<p>同样 TP=8，在这些拓扑上的结果完全不同。部署前应查看 <code>nvidia-smi topo -m</code>、NIC 亲和和 NCCL topology log。</p>
+<p>四个参与者可能位于同一高速交换域，也可能跨两个普通以太网节点。逻辑操作相同，必要传输路径却不同。先用 <code>nvidia-smi topo -m</code> 等工具确认 GPU、CPU 和 NIC 的邻近关系，再结合通信日志核对实际接口。</p>
+<p>尤其要区分空闲独占测试和共享网络下的训练。链路标称速度不等于该作业可用吞吐，NUMA 和网卡亲和也会引入额外路径。</p>
 <h2 id="同步等待">同步等待<a class="anchor" href="#同步等待" aria-label="链接到本节">#</a></h2>
-<p>collective 需要所有参与 rank 以兼容顺序加入。一个 rank 因数据加载、CPU 抖动或 kernel 变慢，其他 rank 会在通信点等待。表面上看是 NCCL 慢，根因可能在最慢 rank 之前。</p>
-<p>排查 hang 时检查：</p>
-<ol>
-<li>所有 rank 是否调用了相同 collective；</li>
-<li>tensor shape、dtype、count 是否一致；</li>
-<li>是否有 rank 更早抛异常；</li>
-<li>网络接口和权限是否正确；</li>
-<li>超时是否掩盖真实首错；</li>
-<li>日志时间线中哪个 rank 最先偏离。</li>
-</ol>
+<p>参与者必须以兼容的顺序调用操作，并满足对应形状、精度和计数规则。某个 rank 在到达通信前读数据很慢，其他 rank 的等待会出现在 collective 区间，但根因可能不在通信库。</p>
+<p>排查时按运行 ID 对齐各 rank 的时间线，查最早异常与首次顺序分歧。接口选择和权限也是条件，但不应跳过应用侧的一致性检查。</p>
 <h3 id="所有进程都活着-collective-也可能永远等不到">所有进程都活着，collective 也可能永远等不到<a class="anchor" href="#所有进程都活着-collective-也可能永远等不到" aria-label="链接到本节">#</a></h3>
-<p>若 rank 0 调 AllReduce，rank 1 因条件分支跳过它，其他 rank 等不到匹配操作。若它们顺序或 tensor 形状不一致，同样可能出错。这类问题与网络带宽不足不同，升级网卡无法修复。</p>
-<p>先按统一 run ID 对齐所有 rank 的日志，找到第一次分歧。某 rank 在通信前 OOM，其他日志最后显示 NCCL 超时，首错仍是显存。通信处等待只告诉你依赖未满足，没有直接证明通信库是根因。</p>
+<p>若 rank 0 等待梯度 AllReduce，rank 1 却因分支进入下一次参数 AllGather，两个进程都存在也不能匹配完成。另一个常见轨迹是某 rank 先 OOM，其他参与者稍后才报告通信超时。</p>
+<p>恢复日志应保留首错与后续连锁错误的顺序。把最后一条 timeout 当作首因，可能导致反复调整网络却从未修复内存或控制流问题。</p>
 <h2 id="通信量如何影响并行选择">通信量如何影响并行选择<a class="anchor" href="#通信量如何影响并行选择" aria-label="链接到本节">#</a></h2>
-<p>TP 往往每层通信，要求低延迟高带宽；PP 主要在 stage 边界传激活；DP/FSDP 在反向传播中同步梯度或参数 shard；EP 使用 AllToAll。</p>
-<p>不要问“哪种 collective 最快”，要问：</p>
-<ul>
-<li>消息多大；</li>
-<li>每 step 几次；</li>
-<li>能否与计算重叠；</li>
-<li>走节点内还是节点间；</li>
-<li>最慢 rank 是否稳定。</li>
-</ul>
+<p>层内 TP 通信频繁，PP 在 stage 边界交换激活，分片训练会组装参数与归约梯度，EP 还需分发 token。比较方案应列每步调用次数、消息大小、参与组和物理路径。</p>
+<p>同样一 GiB 数据，一次大传输与成千上万次小传输耗时不同；可重叠部分也不同。因此“总通信字节更少”是有用线索，却不足以单独决定最快配置。</p>
 <h2 id="overlap-不是免费">Overlap 不是免费<a class="anchor" href="#overlap-不是免费" aria-label="链接到本节">#</a></h2>
-<p>通信与计算重叠需要二者资源相对独立，并满足依赖。通信 kernel 也会使用 GPU 资源和内存带宽。过度切小 bucket 会增加 launch 与同步开销，bucket 太大又推迟通信开始。</p>
+<p>通信若能在不相关计算进行时启动，可以缩短关键路径。前提是后续计算暂不需要结果，且两者争用的资源不会抵消收益。通信 kernel 也可能消耗设备执行和内存带宽。</p>
+<p>bucket 细分有助于更早启动，却增加固定开销；bucket 太大又会推迟开始。应比较完整训练步骤的耗时，不能只凭两条 trace 在时间上交叠就宣布加速。</p>
 <h3 id="大带宽为什么救不了大量小消息">大带宽为什么救不了大量小消息<a class="anchor" href="#大带宽为什么救不了大量小消息" aria-label="链接到本节">#</a></h3>
-<p>用简化模型 <code>时间 ≈ 固定延迟 + 字节数 / 有效带宽</code>。假设延迟 10 μs、带宽 100 GB/s，传 1 KB 的数据时间仅约 0.01 μs，几乎全在固定开销；传 100 MB 则数据部分约 1 ms。真实 collective 有多轮和不同链路，但这个量级说明：切小 bucket 能更早启动，却可能把固定开销重复很多次。</p>
-<p>有效 overlap 要看仍在计算的部分是否依赖该通信结果，以及通信是否争用 GPU 和 HBM。时间轴显示并发，不代表端到端 step 一定缩短，应测最终耗时。</p>
+<p>用教学近似 <code>耗时 = 启动延迟 + 字节 / 吞吐</code>。设固定开销 8 微秒、吞吐 40 GB/s，发送 4 KB 的数据项约 0.1 微秒，固定部分占主导；发送 40 MB 的数据项约 1 毫秒，带宽影响更明显。</p>
+<p>真实 collective 有多轮交换，这里仅展示量级。若将大批内容切成许多极小 bucket，可能把 8 微秒反复支付。调优应同时观察启动次数与关键路径。</p>
 <h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
-<ul>
-<li><code>nccl/src/collectives.cc</code> 与 <code>src/enqueue/</code></li>
-<li><code>nccl/src/graph/</code>：拓扑与 channel 规划</li>
-<li><code>nccl/src/transport/</code>：共享内存、P2P、网络路径</li>
-<li><code>nccl/src/ras/</code>：可靠性与诊断</li>
-<li><code>megatron/core/tensor_parallel/mappings.py</code></li>
-</ul>
-<p>NCCL 源码很底层。初读先跟 API 到 enqueue，再看 topology 如何选择 transport，不要从 device kernel 顺序读起。</p>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="09-parallelism.html"><small>上一章</small><strong>多卡不是一个开关</strong></a><a class="next" href="11-training-loop.html"><small>下一章</small><strong>训练循环与训练显存</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>从 <code>nccl/src/collectives.cc</code> 看操作入队，再看 <code>nccl/src/enqueue/</code>。拓扑规划在 <code>nccl/src/graph/</code>，传输选择在 <code>nccl/src/transport/</code>，诊断相关代码可查 <code>nccl/src/ras/</code>。需要把模型切分与通信语义连接时，参考 <code>megatron/core/tensor_parallel/mappings.py</code>，先确认参与组与张量布局再深入设备实现。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="09-parallelism.html"><small>上一章</small><strong>多卡不是一个开关</strong></a><a class="next" href="11-training-loop.html"><small>下一章</small><strong>训练循环与训练显存</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

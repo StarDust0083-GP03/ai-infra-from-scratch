@@ -1,236 +1,178 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>术语、公式与命令速查 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Appendix</div><div class="rail-title">术语、公式与命令速查</div><ol><li><a href="#基础术语">基础术语</a></li><li><a href="#推理术语">推理术语</a></li><li><a href="#并行术语">并行术语</a></li><li><a href="#显存公式">显存公式</a></li><li><a href="#常用检查">常用检查</a></li><li><a href="#症状速查">症状速查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">附录 A</div><h1>术语、公式与命令速查</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>这页用于回查正文里的账本与数据关系。记住 AllGather 的名字，还要能指出各 rank 原有什么、操作后拿到什么；记住 KV 公式，还要知道它只覆盖缓存，而非全部推理显存。公式的每个乘数都是一个实际维度，不能脱离模型结构套用。</p>
-<p>命令输出也按层解读：设备可见不代表模型已加载，Pod Running 不代表 rank group 就绪。回到具体请求或训练 step，沿数据和等待路径定位，速查才会成为理解的辅助。</p>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Appendix</div><div class="rail-title">术语、公式与命令速查</div><ol><li><a href="#基础术语">基础术语</a></li><li><a href="#推理术语">推理术语</a></li><li><a href="#并行术语">并行术语</a></li><li><a href="#显存公式">显存公式</a></li><li><a href="#常用检查">常用检查</a></li><li><a href="#症状速查">症状速查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">附录 A</div><h1>术语、公式与命令速查</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>遇到陌生缩写时，先确定它描述对象、执行阶段还是资源关系。下面的速查将名称与可观察内容配对，公式同时注明适用边界，便于回到正文复算。</p>
 <h2 id="基础术语">基础术语<a class="anchor" href="#基础术语" aria-label="链接到本节">#</a></h2>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
-<th>术语</th>
-<th>一句话解释</th>
+<th>名称</th>
+<th>在运行中找什么</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>Token</td>
-<td>模型处理文本的离散 ID 单元</td>
+<td>tokenizer 产生的离散位置及 ID，不按字数替代</td>
 </tr>
 <tr>
 <td>Tensor</td>
-<td>带 shape 和 dtype 的多维数字数组</td>
+<td>形状、元素类型和当前存放位置</td>
 </tr>
 <tr>
 <td>Parameter</td>
-<td>训练得到并长期保存的模型 tensor</td>
+<td>随训练更新、被保存为模型的一组数</td>
 </tr>
 <tr>
 <td>Activation</td>
-<td>forward 中产生、供后续层或 backward 使用的中间结果</td>
+<td>当前前向产生、后续计算可能还需使用的内容</td>
 </tr>
 <tr>
 <td>Gradient</td>
-<td>loss 对参数的导数</td>
+<td>参数更新前积累的导数贡献</td>
 </tr>
 <tr>
 <td>Optimizer state</td>
-<td>Adam moment 等用于更新参数的状态</td>
+<td>moment 等跨步骤延续的更新历史</td>
 </tr>
 <tr>
 <td>HBM</td>
-<td>GPU 高带宽显存</td>
+<td>设备的大容量高带宽存储层</td>
 </tr>
 <tr>
 <td>Kernel</td>
-<td>在 GPU 上执行的计算程序</td>
+<td>一次提交到设备的计算程序</td>
 </tr>
 <tr>
 <td>Stream</td>
-<td>CUDA 异步操作的有序队列</td>
+<td>按依赖和顺序执行异步工作的队列</td>
 </tr>
 <tr>
-<td>Rank</td>
-<td>分布式进程的编号</td>
-</tr>
-<tr>
-<td>World size</td>
-<td>一次分布式作业中的 rank 总数</td>
+<td>Rank / World size</td>
+<td>参与者标识与组内参与总数</td>
 </tr>
 <tr>
 <td>Collective</td>
-<td>多个 rank 共同参与的通信操作</td>
+<td>组内必须匹配参与的数据交换操作</td>
 </tr>
 </tbody></table></div>
 <h2 id="推理术语">推理术语<a class="anchor" href="#推理术语" aria-label="链接到本节">#</a></h2>
-<div class="table-wrap" tabindex="0"><table>
-<thead>
-<tr>
-<th>术语</th>
-<th>一句话解释</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>Prefill</td>
-<td>处理 prompt 并建立 KV cache</td>
-</tr>
-<tr>
-<td>Decode</td>
-<td>逐轮生成后续 token</td>
-</tr>
-<tr>
-<td>KV Cache</td>
-<td>保存历史 key/value，避免重复计算</td>
-</tr>
-<tr>
-<td>PagedAttention</td>
-<td>用固定 block 管理逻辑连续 KV</td>
-</tr>
-<tr>
-<td>Continuous batching</td>
-<td>每轮动态移出完成请求、接纳新请求</td>
-</tr>
-<tr>
-<td>TTFT</td>
-<td>请求到第一个输出 token 的时间</td>
-</tr>
-<tr>
-<td>TPOT</td>
-<td>平均每个输出 token 的时间</td>
-</tr>
-<tr>
-<td>ITL</td>
-<td>相邻输出 token 的延迟</td>
-</tr>
-<tr>
-<td>Prefix cache</td>
-<td>复用完全匹配前缀的 KV block</td>
-</tr>
-<tr>
-<td>Preemption</td>
-<td>KV 压力或优先级导致序列暂停/重算</td>
-</tr>
-</tbody></table></div>
+<p>Prefill 处理已知输入并建立历史，decode 使用历史逐步续写。KV cache 保留各层历史 key/value，分页将其逻辑位置映射到物理块；连续批处理则在轮次间改变被执行的请求集合。这几个术语分别描述计算、状态、分配和调度，不宜互相替代。</p>
+<p>TTFT 关注开始输出之前，ITL 关注相邻输出间隔，TPOT 描述生成阶段的平均口径。前缀命中省去部分已知输入计算；抢占则可能暂时释放资源并在之后重复计算。两者对延迟的影响方向不同。</p>
 <h2 id="并行术语">并行术语<a class="anchor" href="#并行术语" aria-label="链接到本节">#</a></h2>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
-<th>缩写</th>
-<th>切分方向</th>
-<th>主要通信</th>
+<th>方式</th>
+<th>工作归属变化</th>
+<th>需要检查的代价</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>DP</td>
-<td>batch / 请求</td>
-<td>训练常 AllReduce 梯度</td>
+<td>不同副本拿不同数据或请求</td>
+<td>训练梯度一致性与副本容量</td>
 </tr>
 <tr>
 <td>TP</td>
-<td>单层 tensor</td>
-<td>每层 AllReduce/AllGather 等</td>
+<td>一层内的矩阵被拆开</td>
+<td>层内频繁交换和小矩阵效率</td>
 </tr>
 <tr>
 <td>PP</td>
-<td>模型层</td>
-<td>stage 间激活</td>
+<td>不同 stage 负责不同层</td>
+<td>激活交接、失衡与起止空泡</td>
 </tr>
 <tr>
 <td>CP</td>
-<td>序列</td>
-<td>attention 所需跨卡数据</td>
+<td>序列位置分给参与者</td>
+<td>注意力跨位置所需交换</td>
 </tr>
 <tr>
 <td>EP</td>
-<td>MoE expert</td>
-<td>AllToAll token 路由</td>
+<td>专家分布在不同设备</td>
+<td>token 分发及专家热点</td>
 </tr>
 <tr>
 <td>FSDP</td>
-<td>参数、梯度、优化器</td>
-<td>AllGather + ReduceScatter</td>
+<td>训练状态分片驻留</td>
+<td>按需组装、梯度归约与保存格式</td>
 </tr>
 </tbody></table></div>
 <h2 id="显存公式">显存公式<a class="anchor" href="#显存公式" aria-label="链接到本节">#</a></h2>
 <h3 id="权重">权重<a class="anchor" href="#权重" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">weight bytes ≈ parameters × bits_per_weight / 8
-</code></pre>
+<p><code>参数个数 × 每参数位数 ÷ 8</code> 给内容字节下界。例如 30 亿参数、8 位约为 2.79 GiB，未包含尺度、对齐与未量化部分。</p>
 <h3 id="kv-cache">KV Cache<a class="anchor" href="#kv-cache" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">KV bytes
-≈ 2 × layers × kv_heads × head_dim
-  × active_tokens × bytes_per_element
-</code></pre>
+<p>常规同配置全注意力模型可用 <code>2 × L × Hkv × D × 元素字节 × 保留位置数</code>。本书的 24 层、4 个 KV head、96 维、2 bytes 得每位置 36 KiB。分页容量、共享与混合架构须另算。</p>
 <h3 id="常见混合精度-adam-教学估算">常见混合精度 Adam 教学估算<a class="anchor" href="#常见混合精度-adam-教学估算" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">training state ≈ parameters × 16 bytes
-</code></pre>
-<p>这项不含激活、通信 buffer、临时 tensor 和 allocator 余量，具体实现必须实测。</p>
+<p>一种示意配置为每参数 <code>2 + 2 + 4 + 8 = 16 bytes</code>，分别对应低精度参数、梯度、主参数与两份 moment。30 亿参数约 44.70 GiB，不含激活和临时空间；实际以状态 tensor 为准。</p>
 <h3 id="global-batch">Global batch<a class="anchor" href="#global-batch" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">global batch
-= micro batch per GPU × data parallel degree × accumulation steps
-</code></pre>
+<p>在简单同步 DP 条件下，<code>每数据副本 micro-batch × DP 度 × 累积次数</code>。3 份样本、4 个副本、5 次累积得到 60 份。TP、PP 不额外贡献独立样本。</p>
 <h3 id="little-39-s-law">Little&#39;s Law<a class="anchor" href="#little-39-s-law" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">average in-flight requests = arrival rate × average time in system
-L = λW
-</code></pre>
+<p><code>L = λW</code> 要求平均边界一致，并在适当稳定条件下使用。每秒 6 条进入、平均停留 3 秒，对应平均在内 18 条，不是 p99 或设备需求保证。</p>
 <h2 id="常用检查">常用检查<a class="anchor" href="#常用检查" aria-label="链接到本节">#</a></h2>
 <h3 id="gpu-与拓扑">GPU 与拓扑<a class="anchor" href="#gpu-与拓扑" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-bash">nvidia-smi
+<pre><code class="language-bash">nvidia-smi --query-gpu=uuid,name,memory.total,memory.used --format=csv
 nvidia-smi topo -m
-nvidia-smi -q
 </code></pre>
+<p>前一条确认设备及容量口径，后一条查看邻近关系；两者均不能证明目标模型已通过性能测试。</p>
 <h3 id="kubernetes">Kubernetes<a class="anchor" href="#kubernetes" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-bash">kubectl describe node &lt;node&gt;
+<pre><code class="language-bash">kubectl get nodes -o wide
+kubectl describe node GPU_NODE
 kubectl get pods -A -o wide
-kubectl describe pod &lt;pod&gt;
-kubectl get events --sort-by=.lastTimestamp
+kubectl describe pod ARCHIVE_POD
 </code></pre>
+<p>将大写名称替换成实际对象。先看资源与事件，再看容器运行和应用初始化，避免混淆 Pending 与已启动后的设备错误。</p>
 <h3 id="本书离线实验">本书离线实验<a class="anchor" href="#本书离线实验" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-bash">python3 examples/infra_lab.py memory
+<pre><code class="language-bash">python3 examples/infra_lab.py memory --parameters 3 --context 6144
 python3 examples/infra_lab.py simulate
+python3 examples/infra_lab.py check
 </code></pre>
+<p>最后一条运行公式、分页、调度和无进展条件的离线断言，不会调用 GPU 或云服务。</p>
 <h2 id="症状速查">症状速查<a class="anchor" href="#症状速查" aria-label="链接到本节">#</a></h2>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
-<th>症状</th>
-<th>先查什么</th>
+<th>观测</th>
+<th>下一份应采集的证据</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>加载时 OOM</td>
-<td>权重精度、分片、runtime 余量</td>
+<td>加载阶段申请失败</td>
+<td>权重转换生命周期与同时存活副本</td>
 </tr>
 <tr>
-<td>运行一段时间 OOM</td>
-<td>KV 增长、请求释放、allocator 峰值</td>
+<td>长输入后申请失败</td>
+<td>已缓存长度、块池及工作区峰值</td>
 </tr>
 <tr>
-<td>TTFT 高</td>
-<td>网关/引擎排队、prompt 长度、prefill</td>
+<td>首字等待增加</td>
+<td>分词、引擎等待与输入执行的分段</td>
 </tr>
 <tr>
-<td>TPOT 高</td>
-<td>decode batch、权重带宽、TP 通信</td>
+<td>续写不平滑</td>
+<td>单请求 ITL、抢占与必要通信</td>
 </tr>
 <tr>
-<td>GPU 利用率低</td>
-<td>CPU tokenizer、数据、同步、queue</td>
+<td>卡空闲但作业未完成</td>
+<td>数据就绪队列与 rank 前置依赖</td>
 </tr>
 <tr>
-<td>多卡比单卡慢</td>
-<td>消息大小、拓扑、collective、每卡工作量</td>
+<td>跨卡后吞吐降低</td>
+<td>实际拓扑、消息粒度和 stage 时间</td>
 </tr>
 <tr>
-<td>训练卡在 NCCL</td>
-<td>其他 rank 首错、调用顺序、网络</td>
+<td>通信超时</td>
+<td>全部参与者的首错与调用顺序</td>
 </tr>
 <tr>
-<td>Pod 一直 Pending</td>
-<td>GPU allocatable、队列、affinity、gang</td>
+<td>作业没有准入</td>
+<td>可用完整组、队列份额与拓扑约束</td>
 </tr>
 <tr>
-<td>冷启动很慢</td>
-<td>权重存储、并发下载、load、compile、warmup</td>
+<td>副本准备缓慢</td>
+<td>下载、加载、编译和预热各阶段</td>
 </tr>
 <tr>
-<td>checkpoint 无法恢复</td>
-<td>完成标记、版本、world size、reshard、数据状态</td>
+<td>无法继续训练</td>
+<td>已提交状态、配置兼容与数据游标</td>
 </tr>
 </tbody></table></div>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="19-platform-design.html"><small>上一章</small><strong>端到端：设计一个小型 AI 平台</strong></a><a class="next" href="appendix-sources.html"><small>下一章</small><strong>源码地图、来源与版本说明</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="19-platform-design.html"><small>上一章</small><strong>端到端：设计一个小型 AI 平台</strong></a><a class="next" href="appendix-sources.html"><small>下一章</small><strong>源码地图、来源与版本说明</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>

@@ -1,77 +1,44 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>显存账本：模型到底占多少 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 04</div><div class="rail-title">显存账本：模型到底占多少</div><ol><li><a href="#推理账本">推理账本</a></li><li><a href="#训练账本">训练账本</a></li><li><a href="#激活为什么难用一个倍数表达">激活为什么难用一个倍数表达</a></li><li><a href="#已分配-已保留与可用">已分配、已保留与可用</a></li><li><a href="#oom-排查顺序">OOM 排查顺序</a></li><li><a href="#用计算器建立量级感">用计算器建立量级感</a></li><li><a href="#一条安全规则">一条安全规则</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 04 章</div><h1>显存账本：模型到底占多少</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>显存不足不是一个原因，而是一张账单的总和。先把账分栏，再决定量化、分片、减 batch 还是缩短上下文。</p>
-<figure class="diagram" tabindex="0"><svg viewBox="0 0 900 380" role="img" aria-label="训练和推理的显存构成对比">
-<text x="40" y="38" class="eyebrow">GPU MEMORY LEDGER</text>
-<text x="40" y="84" class="label">推理</text><g><rect x="130" y="62" width="300" height="44" class="seg one"/><rect x="430" y="62" width="180" height="44" class="seg two"/><rect x="610" y="62" width="130" height="44" class="seg three"/><rect x="740" y="62" width="120" height="44" class="seg four"/></g>
-<g class="small center"><text x="280" y="90">权重</text><text x="520" y="90">KV Cache</text><text x="675" y="90">Workspace</text><text x="800" y="90">余量</text></g>
-<text x="40" y="174" class="label">训练</text><g><rect x="130" y="152" width="150" height="44" class="seg one"/><rect x="280" y="152" width="105" height="44" class="seg two"/><rect x="385" y="152" width="225" height="44" class="seg three"/><rect x="610" y="152" width="130" height="44" class="seg five"/><rect x="740" y="152" width="120" height="44" class="seg four"/></g>
-<g class="small center"><text x="205" y="180">权重</text><text x="332" y="180">梯度</text><text x="497" y="180">优化器</text><text x="675" y="180">激活</text><text x="800" y="180">缓冲</text></g>
-<g class="box soft"><rect x="40" y="252" width="820" height="82" rx="4"/></g><text x="70" y="282" class="label">公式只是下界</text><text x="70" y="309" class="small">allocator 保留、CUDA graph、通信 buffer、临时 tensor 与碎片都要实测。</text>
-</svg><figcaption>图：推理和训练使用不同的显存账本。</figcaption></figure>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 04</div><div class="rail-title">显存账本：模型到底占多少</div><ol><li><a href="#推理账本">推理账本</a></li><li><a href="#训练账本">训练账本</a></li><li><a href="#激活为什么难用一个倍数表达">激活为什么难用一个倍数表达</a></li><li><a href="#已分配-已保留与可用">已分配、已保留与可用</a></li><li><a href="#oom-排查顺序">OOM 排查顺序</a></li><li><a href="#用计算器建立量级感">用计算器建立量级感</a></li><li><a href="#一条安全规则">一条安全规则</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 04 章</div><h1>显存账本：模型到底占多少</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>馆藏问答在加载时只用掉部分显存，几位读者提交长卷宗后却发生 OOM。模型没有变大，增长的是同时存活的请求状态。处理这类问题，需要将常驻内容、随负载变化的内容和执行峰值分开记账。</p>
+<figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 410" role="img" aria-label="同一设备，不同工作有不同内存组成"><title>同一设备，不同工作有不同内存组成</title><rect width="960" height="410" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">同一设备，不同工作有不同内存组成</text><text x="30" y="154" font-size="22" fill="#202b32" text-anchor="start">推理</text><rect x="135" y="120" width="230" height="64" fill="#e7eef0" stroke="#bfc8cc"/><text x="147" y="158" font-size="19" fill="#202b32" text-anchor="start">权重</text><rect x="365" y="120" width="220" height="64" fill="#e8e5db" stroke="#bfc8cc"/><text x="377" y="158" font-size="19" fill="#202b32" text-anchor="start">KV</text><rect x="585" y="120" width="150" height="64" fill="#e7eef0" stroke="#bfc8cc"/><text x="597" y="158" font-size="19" fill="#202b32" text-anchor="start">工作区</text><rect x="735" y="120" width="140" height="64" fill="#e8e5db" stroke="#bfc8cc"/><text x="747" y="158" font-size="19" fill="#202b32" text-anchor="start">运行时</text><text x="30" y="294" font-size="22" fill="#202b32" text-anchor="start">训练</text><rect x="135" y="260" width="120" height="64" fill="#e7eef0" stroke="#bfc8cc"/><text x="147" y="298" font-size="19" fill="#202b32" text-anchor="start">参数</text><rect x="255" y="260" width="120" height="64" fill="#e8e5db" stroke="#bfc8cc"/><text x="267" y="298" font-size="19" fill="#202b32" text-anchor="start">梯度</text><rect x="375" y="260" width="300" height="64" fill="#e7eef0" stroke="#bfc8cc"/><text x="387" y="298" font-size="19" fill="#202b32" text-anchor="start">优化器</text><rect x="675" y="260" width="200" height="64" fill="#e8e5db" stroke="#bfc8cc"/><text x="687" y="298" font-size="19" fill="#202b32" text-anchor="start">激活 / 临时</text><text x="135" y="220" font-size="18" fill="#245d79" text-anchor="start">请求长度与并发增加 KV；当前执行形状改变工作区。</text><text x="135" y="360" font-size="17" fill="#56616b" text-anchor="start">示意分类，不按比例；训练的长期状态不能靠减少请求并发消除。</text></g></svg>
+<figcaption>图：相同设备上的两套账：推理增加请求状态，训练增加梯度、优化器与反向所需激活。</figcaption></figure>
 
 <h2 id="推理账本">推理账本<a class="anchor" href="#推理账本" aria-label="链接到本节">#</a></h2>
 <h3 id="权重">权重<a class="anchor" href="#权重" aria-label="链接到本节">#</a></h3>
-<pre><code class="language-text">weights ≈ parameters × bits / 8
-</code></pre>
-<p>这是最稳定的一项。量化能降低它，但 scale、打包和某些层保持高精度会产生额外开销。</p>
+<p>参数个数乘存储位数再除以 8，得到权重内容的字节下界。30 亿参数按 16 位约占 5.59 GiB；压成 8 位约为 2.79 GiB，尚未加入量化尺度、对齐和保持高精度的部分。</p>
 <h3 id="kv-cache">KV Cache<a class="anchor" href="#kv-cache" aria-label="链接到本节">#</a></h3>
-<p>它随活跃 token 数增长，而不是只由模型大小决定。相同模型在并发 1 和并发 100 下，KV 需求可能差两个数量级。</p>
+<p>每条仍在运行的序列都可能增加历史 key/value。并发数和每条序列的已缓存长度要一起统计。两种流量拥有相同请求数，也可能由于长度差异产生完全不同的缓存压力。</p>
 <h3 id="激活与-workspace">激活与 workspace<a class="anchor" href="#激活与-workspace" aria-label="链接到本节">#</a></h3>
-<p>一次 forward 的中间 tensor、attention workspace、采样和通信 buffer。它们随 batch、token 数、kernel 和并行策略变化。</p>
+<p>模型执行会产生当前批次的中间结果，kernel 和通信还需要工作缓冲。这些空间未必长期驻留，却可能决定某一次 forward 能否成功。增加每轮 token 预算会改变这部分峰值。</p>
 <h3 id="运行时保留">运行时保留<a class="anchor" href="#运行时保留" aria-label="链接到本节">#</a></h3>
-<p>CUDA context、allocator cache、CUDA graph 内存池、编译产物和碎片。服务通常不能把权重加 KV 算到显存容量的 100%。</p>
+<p>设备上下文、分配器缓存和图执行内存池也占空间。有些保留可以复用，有些属于不能轻易让出的运行条件。设备总容量减去权重，并不等于允许 KV 用满的容量。</p>
 <h2 id="训练账本">训练账本<a class="anchor" href="#训练账本" aria-label="链接到本节">#</a></h2>
-<p>训练需要：</p>
-<ul>
-<li>权重；</li>
-<li>梯度；</li>
-<li>优化器状态，例如 Adam 的一阶和二阶矩；</li>
-<li>混合精度下可能存在 FP32 master weights；</li>
-<li>forward 激活，供 backward 使用；</li>
-<li>通信 bucket、临时 tensor 和 allocator 余量。</li>
-</ul>
-<p>一个常见教学估算是混合精度 Adam 每参数约 16 bytes：2 bytes 权重、2 bytes 梯度、4 bytes master weight、8 bytes 两个 FP32 moment。实现不同，不能把 16 当作定律。</p>
-<p>70 亿参数按 16 bytes 估算，训练状态约 104.31 GiB，还没算激活。这解释了为什么单卡能推理的模型，训练可能需要多卡分片。</p>
+<p>反向计算要使用激活，更新参数要使用梯度与优化器状态。一个用于说明量级的混合精度 Adam 方案为：低精度参数 2 bytes、梯度 2 bytes、主参数 4 bytes、两份 FP32 moment 共 8 bytes，即每参数 16 bytes。</p>
+<p>30 亿参数据此需要约 44.70 GiB，还未加入激活和临时空间。具体实现可能没有独立主参数，梯度精度也可能不同，应按真实 tensor 清点，不能把 16 bytes 当作训练通用常数。</p>
 <h3 id="权重放得下-不代表服务容量足够">权重放得下，不代表服务容量足够<a class="anchor" href="#权重放得下-不代表服务容量足够" aria-label="链接到本节">#</a></h3>
-<p>以一张假设 24 GiB 卡为例，7B 的 16 位权重下界约 13.04 GiB。扣除权重后的十余 GiB，还要给 KV、激活、workspace 和运行时留位置。若只按权重判断可接多少请求，就忽略了随上下文和并发增长的主项。</p>
-<p>训练还需梯度与优化器状态，因此同一模型从推理切到训练，账本发生结构变化。降低请求并发能减少推理 KV，却不能消除 Adam moments；选择措施前先确定要减少哪一栏。</p>
+<p>取一张假设的 16 GiB 卡，扣除 5.59 GiB 权重，再预留 2 GiB 给运行时与峰值，约剩 8.41 GiB。这个余额只是 KV 规划的起点，不是已经证明能服务任意长请求。</p>
+<p>如果改做训练，仅长期状态的教学估算就超出这张卡。此时降低在线并发无法解决优化器占用；需要重新考虑训练状态分片、精度或模型规模。</p>
 <h2 id="激活为什么难用一个倍数表达">激活为什么难用一个倍数表达<a class="anchor" href="#激活为什么难用一个倍数表达" aria-label="链接到本节">#</a></h2>
-<p>激活取决于 batch、序列长度、隐藏维度、层数、attention 实现和哪些 tensor 被保存。它与参数量不总是线性同倍增长。长序列训练中，激活可能成为主项。</p>
-<p>Activation checkpointing 只保存部分边界，backward 时重算中间结果，以计算换显存。它不会减少权重或优化器状态。</p>
+<p>样本数量、序列长度、层宽以及算子保存哪些结果都会改变激活。注意力实现若避免物化某些大矩阵，峰值也会变化，所以“参数显存乘某倍数”无法覆盖所有形状。</p>
+<p>激活检查点只留部分边界，反向时重新执行部分 forward。它减少的是被舍弃的中间结果，并不自动减少参数、梯度或 Adam moment。采用前应测显存下降和重算增加的时间。</p>
 <h2 id="已分配-已保留与可用">已分配、已保留与可用<a class="anchor" href="#已分配-已保留与可用" aria-label="链接到本节">#</a></h2>
-<p>PyTorch caching allocator 会保留释放后的块供后续复用：</p>
-<ul>
-<li>allocated：活跃 tensor 实际占用；</li>
-<li>reserved：allocator 向 CUDA 申请并保留；</li>
-<li>free：设备报告未被当前进程保留的部分。</li>
-</ul>
-<p>看到 OOM 时，要同时看峰值 allocated、reserved、碎片和失败分配大小。只在 OOM 后调用清 cache，通常治不了仍被活跃 tensor 占用的问题。</p>
+<p>在 PyTorch 中，allocated 描述活跃 tensor 占用，reserved 描述分配器保留的空间。驱动所见可用容量还受其他进程与运行时影响。三者不是同一层的计数，比较前要统一时间点。</p>
+<p>OOM 信息中的失败分配大小也值得保留：无法再申请一个大连续工作区，与累计小块持续增长，排查方向不同。必要时采集峰值和内存快照，而非只在故障后截取一行 <code>nvidia-smi</code>。</p>
 <h3 id="释放-tensor-后-reserved-为什么没有立刻下降">释放 tensor 后，reserved 为什么没有立刻下降<a class="anchor" href="#释放-tensor-后-reserved-为什么没有立刻下降" aria-label="链接到本节">#</a></h3>
-<p>Python 不再持有一个 tensor，allocator 可以把其块留给后续分配，而不立即还给驱动。因此 allocated 降了、reserved 没降，可能是正常缓存。仍被引用的 tensor 则不能靠 empty_cache 消失。</p>
-<p>加载即 OOM 多半先查权重与加载峰值；长请求运行后 OOM 再查 KV 与临时空间；长时间逐步增长则查引用与释放路径。三种症状都叫 OOM，减少同一个参数未必解决。</p>
+<p>用完的块可能留在进程分配器里，供下一轮使用。allocated 下降而 reserved 稳定通常符合缓存设计。若列表、闭包或结果缓存仍引用 tensor，它根本没有释放，清理空闲缓存也不能回收这部分。</p>
+<p>可用三个时点做实验：刚加载后、第一轮长输入后、请求结束后。如果结束后活跃占用持续递增，就检查请求资源和引用生命周期；若只在大输入时出现峰值，应先看当前执行形状。</p>
 <h2 id="oom-排查顺序">OOM 排查顺序<a class="anchor" href="#oom-排查顺序" aria-label="链接到本节">#</a></h2>
-<ol>
-<li>记录失败时的 batch、序列长度和并发。</li>
-<li>区分加载时 OOM、首次 forward OOM、稳定运行后 OOM。</li>
-<li>查看权重、KV、激活或临时 workspace 哪项随负载增长。</li>
-<li>检查是否有 tensor 引用泄漏或请求未释放。</li>
-<li>再选择量化、减 token budget、分片、checkpointing 或扩卡。</li>
-</ol>
-<p>随机调 <code>gpu_memory_utilization</code> 只是在移动边界，不说明哪项失控。</p>
+<p>先保存失败请求的实际 token 数、并发、精度和运行配置。再区分权重读取转换时失败、首次执行失败，还是多轮运行后失败。沿对应阶段查找同时存活的对象，确认它是否按预期释放。</p>
+<p>找到增长项后再选动作：权重可考虑量化或分片，KV 可限制总活跃长度，激活可减每轮工作量或重算。只调显存利用比例可能推迟报错，却不能证明增长已受控。</p>
 <h2 id="用计算器建立量级感">用计算器建立量级感<a class="anchor" href="#用计算器建立量级感" aria-label="链接到本节">#</a></h2>
 <pre><code class="language-bash">python3 examples/infra_lab.py memory \
-  --parameters 7 \
-  --weight-bits 16 \
-  --layers 32 \
-  --kv-heads 8 \
-  --head-dim 128 \
-  --context 8192 \
-  --concurrent-requests 8
+  --parameters 3 --weight-bits 16 \
+  --layers 24 --kv-heads 4 --head-dim 96 \
+  --context 6144 --concurrent-requests 6
 </code></pre>
-<p>默认输出的 8 GiB KV 是“每条请求都用满 8192 token”的上界场景。真实容量规划应使用长度分布和峰值并发，而不是把最大上下文乘平均并发。</p>
+<p>每 token 的常规 KV 下界为 36 KiB。六条请求若都缓存到 6144 个位置，共 36,864 个位置，对应 1.265625 GiB。这是显式最大长度组合，不含分页尾块、工作区或前缀共享。</p>
 <h3 id="预算要留给峰值-而不只是平均">预算要留给峰值，而不只是平均<a class="anchor" href="#预算要留给峰值-而不只是平均" aria-label="链接到本节">#</a></h3>
-<p>平均上下文很短，少量长输入也可能在同一时刻占据大量块。容量估算应设代表性长度分布，再压测突发与极端组合。分页减少预留浪费，没有消除有效 token 和 workspace 的实际空间。</p>
-<p>计算器输出是理论量级，未模拟 allocator、kernel 临时结果和所有并行 buffer。预测接近容量上限时，应更谨慎地增加余量，而不是把公式多保留几位小数当成精度保证。</p>
+<p>平均读者只提交几百 token，并不能排除几份长卷宗同时到达。容量测试应包含这种组合，并检查运行中生成使长度继续增长的情形。用平均上下文乘平均并发只能描述某个平均状态，无法证明峰值安全。</p>
 <h2 id="一条安全规则">一条安全规则<a class="anchor" href="#一条安全规则" aria-label="链接到本节">#</a></h2>
-<p>容量估算必须留下余量，并在目标软件版本上压测。公式决定是否值得尝试，实测决定是否上线。</p>
-</div><nav class="chapter-nav" aria-label="章节导航"><a href="03-gpu-basics.html"><small>上一章</small><strong>GPU 不是更快的 CPU</strong></a><a class="next" href="05-prefill-decode.html"><small>下一章</small><strong>推理的两幕：Prefill 与 Decode</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">基于官方源码与论文独立撰写 · 快照 2026-09-22 · 图均为原创</footer><script src="../assets/reader.js"></script></body></html>
+<p>计算书面预算时，列出未建模的项；做上线验收时，测量同一软件版本上的加载、长输入、突发和退出后的峰值。只有预测与这些观测能相互解释，才继续提高负载。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="03-gpu-basics.html"><small>上一章</small><strong>GPU 不是更快的 CPU</strong></a><a class="next" href="05-prefill-decode.html"><small>下一章</small><strong>推理的两幕：Prefill 与 Decode</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="../chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="../chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="../chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="../chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="../chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="../chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="../chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="../chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="../chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="../chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="../chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="../chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="../chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="../chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="../chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="../chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="../chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="../chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="../chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="../chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="../assets/reader.js"></script></body></html>
