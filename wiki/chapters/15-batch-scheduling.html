@@ -9,6 +9,16 @@
 <h3 id="一起获得资源-不等于同一瞬间开始计算">一起获得资源，不等于同一瞬间开始计算<a class="anchor" href="#一起获得资源-不等于同一瞬间开始计算" aria-label="链接到本节">#</a></h3>
 <p>资源满足后，成员仍要拉取镜像、加载模型、读取数据和加入 rendezvous。某一个准备缓慢，其他 rank 仍会等它。作业监控应拆开“等待准入”和“已准入但等待协作”。</p>
 <p>若一个辅助服务失败就应阻止开跑，也需显式写入启动条件。调度数量正确不能替代业务就绪检查。</p>
+<figure class="diagram" tabindex="0" data-review-figure="infra-gang-admission">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 396" role="img" aria-labelledby="infra-gang-admission-title infra-gang-admission-desc" style="display:block;width:100%;min-width:620px;height:auto">
+<title id="infra-gang-admission-title">4 个槽位，两个各需 3 个成员的作业</title>
+<desc id="infra-gang-admission-desc">逐 Pod 分配：2 + 2：两个作业都缺 1 个成员，无空槽可用；作业级准入：3 + 0：先让一个完整组获得资源，另一个等待；已分配仍需协作就绪：镜像、加载与 rendezvous 完成后再开跑。3 + 0 只是准入示例，不代表剩余 1 槽必须闲置。</desc>
+<rect width="960" height="396" fill="var(--paper,#faf8f1)"/>
+<g font-family="'IBM Plex Sans','Noto Sans CJK SC',system-ui,sans-serif"><text x="40" y="48" font-size="28" fill="var(--ink,#243b48)" text-anchor="start">4 个槽位，两个各需 3 个成员的作业</text><path d="M176 144 L176 164" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 157 L176 164 L181 157" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="88" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">逐 Pod 分配：2 + 2</text><text x="344" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">两个作业都缺 1 个成员，无空槽可用</text><path d="M176 224 L176 244" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 237 L176 244 L181 237" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="168" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">作业级准入：3 + 0</text><text x="344" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">先让一个完整组获得资源，另一个等待</text><rect x="40" y="248" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#e5ede9))" stroke="var(--forest,var(--accent,#29564c))"/><text x="56" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">已分配仍需协作就绪</text><text x="344" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">镜像、加载与 rendezvous 完成后再开跑</text><path d="M40 332H920" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="40" y="368" font-size="18" fill="var(--muted,#536772)" text-anchor="start">3 + 0 只是准入示例，不代表剩余 1 槽必须闲置。</text></g>
+</svg>
+<figcaption>图：3 + 0 只是准入示例，不代表剩余 1 槽必须闲置。</figcaption>
+</figure>
+
 <h2 id="volcano-的基本对象">Volcano 的基本对象<a class="anchor" href="#volcano-的基本对象" aria-label="链接到本节">#</a></h2>
 <p>Job 描述任务角色与生命周期，PodGroup 描述需要协同的成员，Queue 表达资源组织和策略范围，调度插件实现 gang、公平、优先级或装箱等规则，控制器负责把期望转换成实际对象。</p>
 <p>这些对象管理资源进入条件，不执行模型梯度或 collective。运行时与批调度器之间要约定故障、重启和保存信号。</p>

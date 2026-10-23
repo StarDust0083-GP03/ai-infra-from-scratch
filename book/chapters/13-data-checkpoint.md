@@ -44,6 +44,16 @@
 
 校验还要覆盖预期对象集合、尺寸或校验值，以及 metadata 是否匹配。仅检查“存在八个文件”无法排除写错内容或混入旧分片。
 
+<figure class="diagram" tabindex="0" data-review-figure="infra-checkpoint-commit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 476" role="img" aria-labelledby="infra-checkpoint-commit-title infra-checkpoint-commit-desc" style="display:block;width:100%;min-width:620px;height:auto">
+<title id="infra-checkpoint-commit-title">分片出现，不等于检查点已提交</title>
+<desc id="infra-checkpoint-commit-desc">写临时对象：8 个预期分片及其 metadata；检查完整性：只完成 7 个时，不发布新版本；发布提交记录：完整集合、尺寸或校验值全部通过；恢复只选已提交版本：新尝试失败时仍可回到旧可用点。流程为协议示意；具体原子性取决于目标存储。</desc>
+<rect width="960" height="476" fill="var(--paper,#faf8f1)"/>
+<g font-family="'IBM Plex Sans','Noto Sans CJK SC',system-ui,sans-serif"><text x="40" y="48" font-size="28" fill="var(--ink,#243b48)" text-anchor="start">分片出现，不等于检查点已提交</text><path d="M176 144 L176 164" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 157 L176 164 L181 157" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="88" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">写临时对象</text><text x="344" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">8 个预期分片及其 metadata</text><path d="M176 224 L176 244" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 237 L176 244 L181 237" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="168" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">检查完整性</text><text x="344" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">只完成 7 个时，不发布新版本</text><path d="M176 304 L176 324" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 317 L176 324 L181 317" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="248" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">发布提交记录</text><text x="344" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">完整集合、尺寸或校验值全部通过</text><rect x="40" y="328" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#e5ede9))" stroke="var(--forest,var(--accent,#29564c))"/><text x="56" y="363" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">恢复只选已提交版本</text><text x="344" y="363" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">新尝试失败时仍可回到旧可用点</text><path d="M40 412H920" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="40" y="448" font-size="18" fill="var(--muted,#536772)" text-anchor="start">流程为协议示意；具体原子性取决于目标存储。</text></g>
+</svg>
+<figcaption>图：流程为协议示意；具体原子性取决于目标存储。</figcaption>
+</figure>
+
 ## 同步与异步保存
 
 同步方案在保存完成前暂停训练，边界清晰但会产生停顿。异步方案先形成稳定快照并完成必要 staging，再由后台写出，缩短设备等待。

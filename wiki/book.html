@@ -1,14 +1,14 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>离线合订本 · AI Infra from Scratch</title><link rel="stylesheet" href="assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
 <header class="topbar"><a class="brand" href="index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><div></div><article class="chapter"><section class="book-section"><header class="chapter-head"><div class="chapter-number">00</div><h1>读前说明：不懂 CUDA 也能开始</h1></header><div class="prose"><p>一座档案馆准备开放两项服务：白天让读者询问馆藏资料，夜间用新增的校对文本训练模型。负责系统的工程师发现，模型文件能放进 GPU，服务却仍会排队；夜间作业拥有足够卡数，有时又停在通信步骤。这两件事会贯穿本书。</p>
 <p>我们关心的对象有明确的尺寸和生命周期：一份权重在设备上驻留，一段上下文逐渐增加，一组梯度等待交换，一份检查点尚未写完。把这些对象和等待它们的进程对应起来，才能解释容量、速度与故障。</p>
-<h2 id="你不需要先会什么">你不需要先会什么<a class="anchor" href="#你不需要先会什么" aria-label="链接到本节">#</a></h2>
+<h2 id="00-preface--你不需要先会什么">你不需要先会什么<a class="anchor" href="#00-preface--你不需要先会什么" aria-label="链接到本节">#</a></h2>
 <p>可以从普通 Python 程序和 HTTP 服务的经验出发。遇到 tensor 时，我们会数元素；遇到 collective 时，我们会写出各个参与者拿到什么；遇到 Kubernetes 时，我们只追踪一个资源申请如何落实到设备。无需先完成 CUDA 或分布式系统课程。</p>
 <p>学习过程中也不用购买 GPU。纸上算例可以发现单位错误和资源约束，标准库实验可以检验调度规则。它们无法测出显存带宽、网络拥塞或真实模型的答案质量，后面会把这些限制写在对应实验旁边。</p>
-<h2 id="沿字节和等待连续读下去">沿字节和等待连续读下去<a class="anchor" href="#沿字节和等待连续读下去" aria-label="链接到本节">#</a></h2>
+<h2 id="00-preface--沿字节和等待连续读下去">沿字节和等待连续读下去<a class="anchor" href="#00-preface--沿字节和等待连续读下去" aria-label="链接到本节">#</a></h2>
 <p>档案问答先把扫描材料转换成输入 token，模型读取输入，保存后续生成所需的状态，再逐步产出文字。每多接待一位读者，就可能多一份同时存活的 KV；每换一个并行方案，就可能改变这些状态存放在哪个 rank。</p>
 <p>夜间训练还会保留激活、梯度和优化器状态。读到训练章节时，请继续追问同一个具体问题：这块内存要活到何时，哪个计算会消费它？到了集群章节，再给问题加上位置：它依赖的 GPU、网络和存储现在是否可用？</p>
 <p>数字均带假设。书中的虚构硬件和负载只为便于核算，不代表档案馆真实部署，也不构成产品性能承诺。</p>
-<h2 id="本书怎么验证">本书怎么验证<a class="anchor" href="#本书怎么验证" aria-label="链接到本节">#</a></h2>
+<h2 id="00-preface--本书怎么验证">本书怎么验证<a class="anchor" href="#00-preface--本书怎么验证" aria-label="链接到本节">#</a></h2>
 <p>七个本地仓库承担不同的核对职责。阅读正文无需先打开它们；需要确认实现时，再按附录中的入口查找。</p>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
@@ -47,17 +47,17 @@
 </tr>
 </tbody></table></div>
 <p>本地快照支持“代码中存在这条路径”的判断；论文帮助解释算法；手算验证量纲；运行实验验证实验自身的行为。四种证据不能互相冒充。特别是读过某个 kernel 的代码，并不等于已经在目标设备上复现它的吞吐。</p>
-<h2 id="三条阅读路线">三条阅读路线<a class="anchor" href="#三条阅读路线" aria-label="链接到本节">#</a></h2>
-<h3 id="第一次接触-ai-infra">第一次接触 AI Infra<a class="anchor" href="#第一次接触-ai-infra" aria-label="链接到本节">#</a></h3>
+<h2 id="00-preface--三条阅读路线">三条阅读路线<a class="anchor" href="#00-preface--三条阅读路线" aria-label="链接到本节">#</a></h2>
+<h3 id="00-preface--第一次接触-ai-infra">第一次接触 AI Infra<a class="anchor" href="#00-preface--第一次接触-ai-infra" aria-label="链接到本节">#</a></h3>
 <p>从请求经过的组件开始，读完单卡的字节账，再进入多卡通信。每章完成一个小动作：画一段时间线、算一份 tensor，或写出某个 rank 的输入输出。暂时跳过源码目录也不影响主线。</p>
-<h3 id="只想部署推理服务">只想部署推理服务<a class="anchor" href="#只想部署推理服务" aria-label="链接到本节">#</a></h3>
+<h3 id="00-preface--只想部署推理服务">只想部署推理服务<a class="anchor" href="#00-preface--只想部署推理服务" aria-label="链接到本节">#</a></h3>
 <p>先定位首字等待和生成速度，再读显存、分页与连续批处理。随后补上加载、多卡和服务集群。若模型必须跨卡运行，通信章节也属于上线前知识，不能只调 HTTP 并发。</p>
-<h3 id="正在做训练平台">正在做训练平台<a class="anchor" href="#正在做训练平台" aria-label="链接到本节">#</a></h3>
+<h3 id="00-preface--正在做训练平台">正在做训练平台<a class="anchor" href="#00-preface--正在做训练平台" aria-label="链接到本节">#</a></h3>
 <p>从状态占用与训练循环入手，把数据位置、同步点和保存边界标到一步训练上。再读分片、作业队列和恢复。能启动一个作业只是起点，还需证明它在节点失败后能继续使用正确的数据与优化器状态。</p>
-<h2 id="图怎么看">图怎么看<a class="anchor" href="#图怎么看" aria-label="链接到本节">#</a></h2>
+<h2 id="00-preface--图怎么看">图怎么看<a class="anchor" href="#00-preface--图怎么看" aria-label="链接到本节">#</a></h2>
 <p>新版图解分别采用时间泳道、内存格子、输入输出矩阵和恢复状态机，不把所有问题都画成串联方框。图内的数量仅对应正文算例。</p>
 <p>读图时分清三类连接：数据被搬到另一个位置，任务被安排执行，状态被持久保存。它们对延迟和恢复的影响不同。图中两条路径汇合，也不自动表示两边处于同一个事务。</p>
-<h2 id="示例的边界">示例的边界<a class="anchor" href="#示例的边界" aria-label="链接到本节">#</a></h2>
+<h2 id="00-preface--示例的边界">示例的边界<a class="anchor" href="#00-preface--示例的边界" aria-label="链接到本节">#</a></h2>
 <p>离线实验入口仍是：</p>
 <pre><code class="language-bash">python3 examples/infra_lab.py memory --parameters 3 --context 6144
 python3 examples/infra_lab.py simulate
@@ -69,24 +69,24 @@ python3 examples/infra_lab.py check
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 440" role="img" aria-label="一条档案问答：执行与准备分开观察"><title>一条档案问答：执行与准备分开观察</title><rect width="960" height="440" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">一条档案问答：执行与准备分开观察</text><text x="30" y="130" font-size="18" fill="#56616b" text-anchor="start">接入</text><path d="M115 165 L925 165" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="240" font-size="18" fill="#56616b" text-anchor="start">引擎</text><path d="M115 275 L925 275" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="360" font-size="18" fill="#56616b" text-anchor="start">准备</text><path d="M115 395 L925 395" stroke="#bfc8cc" stroke-width="2" fill="none"/><rect x="140" y="85" width="210" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="154" y="114" font-size="19" fill="#202b32" text-anchor="start">身份与限额</text><text x="154" y="140" font-size="15" fill="#56616b" text-anchor="start">请求 ID / 模型权限</text><path d="M350 118 L405 118" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="405.0,118.0 395.8,121.9 395.8,114.1" fill="#245d79"/><rect x="410" y="85" width="210" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="424" y="114" font-size="19" fill="#202b32" text-anchor="start">模板与分词</text><text x="424" y="140" font-size="15" fill="#56616b" text-anchor="start">形成实际 token 序列</text><path d="M515 153 L515 205" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="515.0,205.0 511.1,195.8 518.9,195.8" fill="#245d79"/><rect x="140" y="205" width="210" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="154" y="234" font-size="19" fill="#202b32" text-anchor="start">等待资源</text><text x="154" y="260" font-size="15" fill="#56616b" text-anchor="start">预算、序列数、KV 块</text><path d="M515 190 L245 205" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="245.0,205.0 254.0,200.6 254.4,208.4" fill="#245d79"/><path d="M350 238 L405 238" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="405.0,238.0 395.8,241.9 395.8,234.1" fill="#245d79"/><rect x="410" y="205" width="210" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="424" y="234" font-size="19" fill="#202b32" text-anchor="start">GPU 组执行</text><text x="424" y="260" font-size="15" fill="#56616b" text-anchor="start">多 rank 协作</text><path d="M620 238 L675 238" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="675.0,238.0 665.8,241.9 665.8,234.1" fill="#245d79"/><rect x="680" y="205" width="240" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="694" y="234" font-size="19" fill="#202b32" text-anchor="start">解码与回传</text><text x="694" y="260" font-size="15" fill="#56616b" text-anchor="start">设备时间 ≠ 收到时间</text><rect x="140" y="325" width="240" height="68" fill="#e7eef0" stroke="#bfc8cc"/><text x="154" y="354" font-size="19" fill="#202b32" text-anchor="start">节点 / 设备 / 模型</text><text x="154" y="380" font-size="15" fill="#56616b" text-anchor="start">控制面先准备容量</text><path d="M380 350 L510 280" stroke="#245d79" stroke-width="2" fill="none" stroke-dasharray="6 5"/><text x="550" y="366" font-size="16" fill="#56616b" text-anchor="start">虚线：准备依赖，不是每 token 请求</text></g></svg>
 <figcaption>图：档案问答请求的三条泳道：接入处理、引擎执行与资源准备。虚线表示准备关系，不表示逐 token 调用。</figcaption></figure>
 
-<h2 id="数据面-请求真正走过的路">数据面：请求真正走过的路<a class="anchor" href="#数据面-请求真正走过的路" aria-label="链接到本节">#</a></h2>
-<h3 id="1-网关">1. 网关<a class="anchor" href="#1-网关" aria-label="链接到本节">#</a></h3>
+<h2 id="01-request-journey--数据面-请求真正走过的路">数据面：请求真正走过的路<a class="anchor" href="#01-request-journey--数据面-请求真正走过的路" aria-label="链接到本节">#</a></h2>
+<h3 id="01-request-journey--1-网关">1. 网关<a class="anchor" href="#01-request-journey--1-网关" aria-label="链接到本节">#</a></h3>
 <p>入口为读者确认身份，检查可用模型与额度，并把请求送到适当副本。限流应同时考虑请求条数和输入大小。十个短问题与十份长篇档案的工作量差异很大，仅按连接数限流会掩盖后者的压力。</p>
-<h3 id="2-api-服务">2. API 服务<a class="anchor" href="#2-api-服务" aria-label="链接到本节">#</a></h3>
+<h3 id="01-request-journey--2-api-服务">2. API 服务<a class="anchor" href="#01-request-journey--2-api-服务" aria-label="链接到本节">#</a></h3>
 <p>服务将角色消息套入目标模型的聊天模板，再分词形成整数序列。模板版本也会改变 token 数，因此预估长度和最终入队长度可能不同。若 CPU 分词已经积压，增加 GPU 的调度预算并不能消除这段等待。</p>
-<h3 id="3-引擎调度器">3. 引擎调度器<a class="anchor" href="#3-引擎调度器" aria-label="链接到本节">#</a></h3>
+<h3 id="01-request-journey--3-引擎调度器">3. 引擎调度器<a class="anchor" href="#01-request-journey--3-引擎调度器" aria-label="链接到本节">#</a></h3>
 <p>一份输入只有同时满足本轮计算预算、序列上限和 KV 空间条件，才有机会被选中。vLLM 的 <code>EngineCore</code> 驱动引擎循环，<code>Scheduler</code> 决定工作分配，<code>KVCacheManager</code> 管理相关内存资源。它们操作的是请求状态，不负责给 Kubernetes 分配节点。</p>
-<h3 id="4-gpu-worker">4. GPU worker<a class="anchor" href="#4-gpu-worker" aria-label="链接到本节">#</a></h3>
+<h3 id="01-request-journey--4-gpu-worker">4. GPU worker<a class="anchor" href="#01-request-journey--4-gpu-worker" aria-label="链接到本节">#</a></h3>
 <p>worker 根据调度结果执行模型。采用张量并行时，多张卡共同完成一个逻辑步骤；不能把它理解成每张卡独立回答一位读者。某个参与者尚未到达通信点，其他参与者即使计算完成也可能继续等待。</p>
-<h3 id="5-流式回传">5. 流式回传<a class="anchor" href="#5-流式回传" aria-label="链接到本节">#</a></h3>
+<h3 id="01-request-journey--5-流式回传">5. 流式回传<a class="anchor" href="#01-request-journey--5-流式回传" aria-label="链接到本节">#</a></h3>
 <p>采样后的 token 经文本解码形成增量，经应用协议返回浏览器。一个 token 可能只构成半个可显示片段，代理也可能合并若干增量发送。应分别记录设备生成时间和客户端收到时间，检查缓冲造成的间隙。</p>
-<h3 id="请求进入副本-不等于已经得到-gpu-时间">请求进入副本，不等于已经得到 GPU 时间<a class="anchor" href="#请求进入副本-不等于已经得到-gpu-时间" aria-label="链接到本节">#</a></h3>
+<h3 id="01-request-journey--请求进入副本-不等于已经得到-gpu-时间">请求进入副本，不等于已经得到 GPU 时间<a class="anchor" href="#01-request-journey--请求进入副本-不等于已经得到-gpu-时间" aria-label="链接到本节">#</a></h3>
 <p>假设教学轨迹中，请求在 0 ms 被入口接受，18 ms 分词完成，直到 96 ms 才进入第一次模型执行。18 到 96 ms 的 78 ms 属于引擎排队。服务的存活检查全部正常，也不会使这段等待消失。</p>
 <p>若设备在 140 ms 已生成首个可用片段，而浏览器到 200 ms 才显示，另有 60 ms 位于设备之后。应检查文本拼接、应用刷新和反向代理缓冲，不能把这 60 ms 再记为 prefill。</p>
-<h2 id="控制面-谁让服务存在">控制面：谁让服务存在<a class="anchor" href="#控制面-谁让服务存在" aria-label="链接到本节">#</a></h2>
+<h2 id="01-request-journey--控制面-谁让服务存在">控制面：谁让服务存在<a class="anchor" href="#01-request-journey--控制面-谁让服务存在" aria-label="链接到本节">#</a></h2>
 <p>副本运行前，需要节点、设备、模型文件和网络服务。控制器根据期望状态创建或修复这些资源，调度器挑选合适节点，Device Plugin 协助 kubelet 暴露设备。准备过程发生在请求热路径之外，却决定副本是否真正可接流量。</p>
 <p>例如新副本已经处于 Running，但仍在读取权重。若此时过早宣布 Ready，入口会把读者送入一条尚不能执行的路径。反过来，存活探针若把正常长初始化误认为死锁，会使加载永远无法结束。</p>
-<h2 id="两个调度器">两个调度器<a class="anchor" href="#两个调度器" aria-label="链接到本节">#</a></h2>
+<h2 id="01-request-journey--两个调度器">两个调度器<a class="anchor" href="#01-request-journey--两个调度器" aria-label="链接到本节">#</a></h2>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
@@ -107,34 +107,34 @@ python3 examples/infra_lab.py check
 </tr>
 </tbody></table></div>
 <p>前者面对 GPU 数量、标签与拓扑，后者面对 token 和 KV 块。两个等待队列应分别测量；把它们统称“服务排队”会使扩容和调参混在一起。</p>
-<h3 id="两个调度层可以分别健康-整体仍然慢">两个调度层可以分别健康，整体仍然慢<a class="anchor" href="#两个调度层可以分别健康-整体仍然慢" aria-label="链接到本节">#</a></h3>
+<h3 id="01-request-journey--两个调度层可以分别健康-整体仍然慢">两个调度层可以分别健康，整体仍然慢<a class="anchor" href="#01-request-journey--两个调度层可以分别健康-整体仍然慢" aria-label="链接到本节">#</a></h3>
 <p>档案馆有两个空闲节点，但引擎副本数固定，空闲卡不会自动参加现有副本的计算。另一种情况是全部副本都已就绪，却被长上下文占据 KV，入口仍不断积累请求。第一种需要改变服务容量，第二种要检查负载和引擎资源边界。</p>
 <p>引擎的一轮选择能很快改变；创建新副本还要等待设备与权重。扩容应基于未来一段时间的压力，并配合有界排队，不能把控制面的动作当作即时救援。</p>
-<h2 id="第一个排障方法-画时间线">第一个排障方法：画时间线<a class="anchor" href="#第一个排障方法-画时间线" aria-label="链接到本节">#</a></h2>
+<h2 id="01-request-journey--第一个排障方法-画时间线">第一个排障方法：画时间线<a class="anchor" href="#01-request-journey--第一个排障方法-画时间线" aria-label="链接到本节">#</a></h2>
 <p>为同一请求 ID 记录入口接受、分词完成、首次被调度、首个生成片段、最后生成片段和客户端结束。计算相邻时间点的差，而非把每层各报的“总耗时”相加，后者可能重复计算重叠区间。</p>
 <p>上例中的 78 ms 排队可以与活跃 KV、等待 token 一起查看。若分词耗时增长而引擎空闲，则应回到 CPU 和输入处理链。时间线让优化动作对应到一段可验证的等待。</p>
-<h2 id="离线与训练路径有什么不同">离线与训练路径有什么不同<a class="anchor" href="#离线与训练路径有什么不同" aria-label="链接到本节">#</a></h2>
+<h2 id="01-request-journey--离线与训练路径有什么不同">离线与训练路径有什么不同<a class="anchor" href="#01-request-journey--离线与训练路径有什么不同" aria-label="链接到本节">#</a></h2>
 <p>夜间批量整理档案时，任务可以按长度分桶，延后短任务的交付换取更好的设备复用。训练则用数据 batch 驱动，不逐条等待读者提问，还会进行反向计算、参数更新和状态保存。它们共享设备，却不应沿用同一组用户延迟目标。</p>
-<h3 id="训练为什么没有网关-仍然会等待">训练为什么没有网关，仍然会等待<a class="anchor" href="#训练为什么没有网关-仍然会等待" aria-label="链接到本节">#</a></h3>
+<h3 id="01-request-journey--训练为什么没有网关-仍然会等待">训练为什么没有网关，仍然会等待<a class="anchor" href="#01-request-journey--训练为什么没有网关-仍然会等待" aria-label="链接到本节">#</a></h3>
 <p>如果校对数据尚未从对象存储读出，GPU 会等待下一批；若一个 rank 读盘较慢，同步训练中的其他 rank 还可能在 collective 处等它。应把数据可用、计算开始和同步结束画到各 rank 的泳道上，才能区分慢网络和慢输入。</p>
-<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<h2 id="01-request-journey--源码入口">源码入口<a class="anchor" href="#01-request-journey--源码入口" aria-label="链接到本节">#</a></h2>
 <p>从 <code>vllm/v1/engine/core.py</code> 追请求进入引擎，再看 <code>vllm/v1/core/sched/scheduler.py</code> 如何产生本轮工作。涉及块的申请和释放时转到 <code>vllm/v1/core/kv_cache_manager.py</code>。准备设备的代码则在 <code>k8s-device-plugin/internal/plugin/</code>，服务调和可从 <code>kuberay/ray-operator/</code> 查起。读这些路径时，以同一对象的创建、使用和释放串联调用关系。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">02</div><h1>最少模型知识：token、tensor 与参数</h1></header><div class="prose"><p>把一批档案送进模型前，需要回答两个量化问题：要处理多少位置，每个位置存多少数。模型术语在容量规划中最终都要落到这两个数量上。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 390" role="img" aria-label="先数位置，再换算存储"><title>先数位置，再换算存储</title><rect width="960" height="390" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">先数位置，再换算存储</text><text x="30" y="90" font-size="23" fill="#245d79" text-anchor="start">3 份序列 × 512 个位置 × 2048 个数</text><rect x="80" y="138" width="340" height="120" fill="#f2f4f0" stroke="#245d79"/><rect x="98" y="156" width="340" height="120" fill="#f2f4f0" stroke="#245d79"/><rect x="116" y="174" width="340" height="120" fill="#f2f4f0" stroke="#245d79"/><text x="180" y="265" font-size="20" fill="#202b32" text-anchor="start">[3, 512, 2048]</text><path d="M470 210 L560 210" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="560.0,210.0 550.8,213.9 550.8,206.1" fill="#245d79"/><text x="590" y="160" font-size="23" fill="#202b32" text-anchor="start">3,145,728 个元素</text><text x="590" y="215" font-size="20" fill="#245d79" text-anchor="start">BF16：× 2 bytes = 6 MiB</text><text x="590" y="260" font-size="20" fill="#a14929" text-anchor="start">FP32：× 4 bytes = 12 MiB</text><text x="35" y="350" font-size="19" fill="#202b32" text-anchor="start">形状决定数量；类型决定每元素空间。这里只计算一份 tensor。</text></g></svg>
 <figcaption>图：三份档案各取 512 个位置，每位置 2048 个数；先数元素，再按精度换算字节。</figcaption></figure>
 
-<h2 id="token-不是字-也不是固定长度">Token 不是字，也不是固定长度<a class="anchor" href="#token-不是字-也不是固定长度" aria-label="链接到本节">#</a></h2>
+<h2 id="02-model-basics--token-不是字-也不是固定长度">Token 不是字，也不是固定长度<a class="anchor" href="#02-model-basics--token-不是字-也不是固定长度" aria-label="链接到本节">#</a></h2>
 <p>同样一份带旧地名、数字和标点的航海日志，不同 tokenizer 可能给出不同数量的 ID。按字符数设置输入限额只是入口保护，实际计算与计费应使用目标 tokenizer 的结果，包括聊天模板带来的额外位置。</p>
 <p>输入 token 影响读取工作，输出 token 影响生成轮数，已经保留的位置影响 KV 占用。容量记录至少应把输入与输出分列；“总长相同”的两种请求不一定有相同延迟。</p>
-<h2 id="tensor-是带形状的数字数组">Tensor 是带形状的数字数组<a class="anchor" href="#tensor-是带形状的数字数组" aria-label="链接到本节">#</a></h2>
+<h2 id="02-model-basics--tensor-是带形状的数字数组">Tensor 是带形状的数字数组<a class="anchor" href="#02-model-basics--tensor-是带形状的数字数组" aria-label="链接到本节">#</a></h2>
 <p><code>[B, S, H]</code> 可以表示 B 份序列、每份 S 个位置、每位置 H 个隐藏数值。取 <code>[3, 512, 2048]</code>，共有 3,145,728 个元素。这里的三个维度描述一份中间结果，不等于模型拥有这些参数。</p>
-<h3 id="形状先决定元素数-精度再决定字节数">形状先决定元素数，精度再决定字节数<a class="anchor" href="#形状先决定元素数-精度再决定字节数" aria-label="链接到本节">#</a></h3>
+<h3 id="02-model-basics--形状先决定元素数-精度再决定字节数">形状先决定元素数，精度再决定字节数<a class="anchor" href="#02-model-basics--形状先决定元素数-精度再决定字节数" aria-label="链接到本节">#</a></h3>
 <p>这份结果若使用 BF16，每元素 2 bytes，共 6,291,456 bytes，即 6 MiB；若改存 FP32，则为 12 MiB。换精度没有改变形状，增加序列长度才会改变位置数。</p>
 <p>真实执行还可能存在转置、打包或临时副本。用形状乘元素字节数可求逻辑内容下界，要估峰值，还需确认这些副本是否同时活着，不能只看最后留下的那份结果。</p>
-<h2 id="参数是模型长期保存的-tensor">参数是模型长期保存的 tensor<a class="anchor" href="#参数是模型长期保存的-tensor" aria-label="链接到本节">#</a></h2>
+<h2 id="02-model-basics--参数是模型长期保存的-tensor">参数是模型长期保存的 tensor<a class="anchor" href="#02-model-basics--参数是模型长期保存的-tensor" aria-label="链接到本节">#</a></h2>
 <p>假设教学模型含 30 亿参数，按 16 位保存，权重下界为 <code>3e9 * 2 / 2**30</code>，约 5.59 GiB。请求变短并不会让这份权重同步缩小。</p>
 <p>检查模型配置和权重文件比只看“3B”标签可靠。嵌入是否共享、量化元数据和保留高精度的层都会改变实际加载大小。文件在磁盘上的尺寸也不能直接替代运行时峰值。</p>
-<h2 id="数据类型决定字节和数值范围">数据类型决定字节和数值范围<a class="anchor" href="#数据类型决定字节和数值范围" aria-label="链接到本节">#</a></h2>
+<h2 id="02-model-basics--数据类型决定字节和数值范围">数据类型决定字节和数值范围<a class="anchor" href="#02-model-basics--数据类型决定字节和数值范围" aria-label="链接到本节">#</a></h2>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
@@ -170,330 +170,340 @@ python3 examples/infra_lab.py check
 </tr>
 </tbody></table></div>
 <p>半 byte 是逻辑记账方式，设备不必逐个半字节访问。低比特格式往往成组存储，并带尺度信息，实际字节数会高于这个下界。</p>
-<h3 id="参数量与请求长度分别让哪部分变大">参数量与请求长度分别让哪部分变大<a class="anchor" href="#参数量与请求长度分别让哪部分变大" aria-label="链接到本节">#</a></h3>
+<h3 id="02-model-basics--参数量与请求长度分别让哪部分变大">参数量与请求长度分别让哪部分变大<a class="anchor" href="#02-model-basics--参数量与请求长度分别让哪部分变大" aria-label="链接到本节">#</a></h3>
 <p>同一个模型回答一句目录查询与处理整卷日志，权重不变，输入处理和历史状态不同。把模型换大则首先改变权重与每步计算；提高同时在线人数则增加并存的请求状态。定位显存增长时应记录究竟是哪一个维度发生了变化。</p>
 <p>BF16 与 FP16 的存储尺寸相等，但可表达的范围不同。容量相同并不能推导出数值行为相同，精度切换后仍需检查溢出、异常值和任务输出。</p>
-<h2 id="层-头和隐藏维度">层、头和隐藏维度<a class="anchor" href="#层-头和隐藏维度" aria-label="链接到本节">#</a></h2>
+<h2 id="02-model-basics--层-头和隐藏维度">层、头和隐藏维度<a class="anchor" href="#02-model-basics--层-头和隐藏维度" aria-label="链接到本节">#</a></h2>
 <p>注意力会在多层保存 key 和 value。估算缓存时要知道层数、KV head 数以及每头维度。教学模型若有 24 层、4 个 KV head、每头 96 维，不能因为 query head 更多就把 KV head 也填成 query head 数。</p>
 <p>这些值通常可从模型 config 查到。滑动窗口、混合注意力或其他架构可能使缓存规则不同，后文的公式会明确限定为常规全注意力情形。</p>
-<h2 id="batch-有两种含义">Batch 有两种含义<a class="anchor" href="#batch-有两种含义" aria-label="链接到本节">#</a></h2>
+<h2 id="02-model-basics--batch-有两种含义">Batch 有两种含义<a class="anchor" href="#02-model-basics--batch-有两种含义" aria-label="链接到本节">#</a></h2>
 <p>训练的一次更新可能累积多个 micro-batch，并由多个数据并行副本共同提供样本。在线推理的一个调度批次，则可能同时包含新输入块和已经开始生成的序列。</p>
 <p>记录“batch 为 12”时，补写单位与范围：12 份样本、12 个活跃序列，还是 12 个 token？是每个数据副本、每卡，还是整个更新？缺少这些说明就无法复算资源需求。</p>
-<h2 id="flop-与-byte-是两本账">FLOP 与 byte 是两本账<a class="anchor" href="#flop-与-byte-是两本账" aria-label="链接到本节">#</a></h2>
+<h2 id="02-model-basics--flop-与-byte-是两本账">FLOP 与 byte 是两本账<a class="anchor" href="#02-model-basics--flop-与-byte-是两本账" aria-label="链接到本节">#</a></h2>
 <p>一次矩阵计算既要执行运算，也要从存储取数。两种实现即使算出同一结果，也可能有不同的数据搬运量；同一个 kernel 在不同 batch 下又可能有不同复用。运算量除以搬运字节量得到算术强度，下一章据此判断可能的限制。</p>
-<h3 id="在线-batch-不应被理解为整齐的矩形">在线 batch 不应被理解为整齐的矩形<a class="anchor" href="#在线-batch-不应被理解为整齐的矩形" aria-label="链接到本节">#</a></h3>
+<h3 id="02-model-basics--在线-batch-不应被理解为整齐的矩形">在线 batch 不应被理解为整齐的矩形<a class="anchor" href="#02-model-basics--在线-batch-不应被理解为整齐的矩形" aria-label="链接到本节">#</a></h3>
 <p>三位读者当前各保留 70、190 和 510 个位置。引擎可以用变长打包和块表描述它们，不必为每人都分配一个长度 510 的完整矩形。数学符号 <code>[B,S,H]</code> 帮我们理解维度，不能据此断言实际分配一定包含填充后的全部槽位。</p>
-<h2 id="一个练习">一个练习<a class="anchor" href="#一个练习" aria-label="链接到本节">#</a></h2>
+<h2 id="02-model-basics--一个练习">一个练习<a class="anchor" href="#02-model-basics--一个练习" aria-label="链接到本节">#</a></h2>
 <p>运行同一组输入，只改变权重精度：</p>
 <pre><code class="language-bash">python3 examples/infra_lab.py memory --parameters 3 --weight-bits 16 --context 6144
 python3 examples/infra_lab.py memory --parameters 3 --weight-bits 8 --context 6144
 </code></pre>
 <p>权重下界应减半，KV 项应保持不变。再把上下文改为 12288，检查 KV 项加倍而权重不变。若你的结果不满足这两点，先查参数是否被误用，不急着解释硬件行为。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">03</div><h1>GPU 不是更快的 CPU</h1></header><div class="prose"><p>档案预处理程序逐文件解析复杂格式，模型计算却对大批规则数组执行相似运算。这两部分适合的处理器不同。把 Python 文件循环放到拥有 GPU 的机器上，不会使它自动变成并行设备计算。</p>
-<h2 id="一张卡里的四个角色">一张卡里的四个角色<a class="anchor" href="#一张卡里的四个角色" aria-label="链接到本节">#</a></h2>
-<h3 id="计算单元">计算单元<a class="anchor" href="#计算单元" aria-label="链接到本节">#</a></h3>
+<h2 id="03-gpu-basics--一张卡里的四个角色">一张卡里的四个角色<a class="anchor" href="#03-gpu-basics--一张卡里的四个角色" aria-label="链接到本节">#</a></h2>
+<h3 id="03-gpu-basics--计算单元">计算单元<a class="anchor" href="#03-gpu-basics--计算单元" aria-label="链接到本节">#</a></h3>
 <p>执行单元擅长让许多数据使用相似指令，tensor core 对支持的矩阵运算提供专门路径。型号表中的峰值必须连同精度、稀疏性和运算口径阅读。模型未使用对应路径时，这个峰值不会转化为实际吞吐。</p>
-<h3 id="hbm-或显存">HBM 或显存<a class="anchor" href="#hbm-或显存" aria-label="链接到本节">#</a></h3>
+<h3 id="03-gpu-basics--hbm-或显存">HBM 或显存<a class="anchor" href="#03-gpu-basics--hbm-或显存" aria-label="链接到本节">#</a></h3>
 <p>设备要从这里读取权重与状态。容量是能同时保留多少内容，带宽是能多快搬出内容，两者不能互换。扩大容量可以放入更多上下文，却不保证每一步读历史状态的耗时更少。</p>
-<h3 id="cache-与-shared-memory">Cache 与 shared memory<a class="anchor" href="#cache-与-shared-memory" aria-label="链接到本节">#</a></h3>
+<h3 id="03-gpu-basics--cache-与-shared-memory">Cache 与 shared memory<a class="anchor" href="#03-gpu-basics--cache-与-shared-memory" aria-label="链接到本节">#</a></h3>
 <p>较近的存储适合保存一小块反复使用的数据。kernel 通过分块避免同一内容反复往返大显存。FlashAttention 的 IO 优化可从这个角度理解：调整精确注意力的计算组织，减少中间结果的慢层级读写，而非用近似答案代替原问题。</p>
-<h3 id="互联">互联<a class="anchor" href="#互联" aria-label="链接到本节">#</a></h3>
+<h3 id="03-gpu-basics--互联">互联<a class="anchor" href="#03-gpu-basics--互联" aria-label="链接到本节">#</a></h3>
 <p>主机和设备之间、设备彼此之间以及节点之间各有传输路径。请求跨越哪一条路径，要看实际进程和数据放置。机器有很多 GPU，并不保证任意两张卡间都拥有同样的带宽和延迟。</p>
-<h2 id="roofline-先判断是哪种上限">Roofline：先判断是哪种上限<a class="anchor" href="#roofline-先判断是哪种上限" aria-label="链接到本节">#</a></h2>
+<h2 id="03-gpu-basics--roofline-先判断是哪种上限">Roofline：先判断是哪种上限<a class="anchor" href="#03-gpu-basics--roofline-先判断是哪种上限" aria-label="链接到本节">#</a></h2>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 460" role="img" aria-label="两个工作点，共用同一条性能天花板"><title>两个工作点，共用同一条性能天花板</title><rect width="960" height="460" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">两个工作点，共用同一条性能天花板</text><path d="M100 340 L890 340" stroke="#202b32" stroke-width="2" fill="none"/><polygon points="890.0,340.0 880.8,343.9 880.8,336.1" fill="#202b32"/><path d="M100 340 L100 80" stroke="#202b32" stroke-width="2" fill="none"/><polygon points="100.0,80.0 103.9,89.2 96.1,89.2" fill="#202b32"/><path d="M100 340 L490 150" stroke="#245d79" stroke-width="2" fill="none"/><path d="M490 150 L880 150" stroke="#245d79" stroke-width="2" fill="none"/><text x="740" y="130" font-size="19" fill="#245d79" text-anchor="start">64 TFLOP/s</text><text x="300" y="90" font-size="18" fill="#56616b" text-anchor="start">带宽 0.8 TB/s</text><text x="520" y="380" font-size="18" fill="#202b32" text-anchor="start">算术强度 FLOP/byte</text><text x="35" y="75" font-size="17" fill="#202b32" text-anchor="start">性能</text><circle cx="198" cy="292" r="7" fill="#a14929"/><text x="210" y="280" font-size="18" fill="#a14929" text-anchor="start">20 → 上限 16</text><circle cx="710" cy="150" r="7" fill="#a14929"/><text x="722" y="138" font-size="18" fill="#a14929" text-anchor="start">160 → 上限 64</text><path d="M490 150 L490 340" stroke="#bfc8cc" stroke-width="2" fill="none" stroke-dasharray="6 5"/><text x="475" y="365" font-size="16" fill="#202b32" text-anchor="start">80</text><text x="115" y="420" font-size="17" fill="#56616b" text-anchor="start">假设设备；上界取 min(计算峰值, 带宽 × 强度)，并非实测曲线。</text></g></svg>
 <figcaption>图：同一假设设备的两种工作点：低强度受搬运限制，高强度触及运算上限。</figcaption></figure>
 
 <p>用目标精度的计算上限，与带宽乘算术强度所得上限比较，取较小者。算术强度是运算次数除以所选择存储层级的搬运字节数；分母口径必须一致。</p>
 <p>这给出理想天花板，实际还会损失在启动、依赖、访存模式和并行度上。远低于两条上限时，不应立即宣布是“计算受限”，可能是数据或任务根本没持续送到设备。</p>
-<h3 id="用一个假设硬件手算-roofline">用一个假设硬件手算 Roofline<a class="anchor" href="#用一个假设硬件手算-roofline" aria-label="链接到本节">#</a></h3>
+<h3 id="03-gpu-basics--用一个假设硬件手算-roofline">用一个假设硬件手算 Roofline<a class="anchor" href="#03-gpu-basics--用一个假设硬件手算-roofline" aria-label="链接到本节">#</a></h3>
 <p>设有效带宽为 0.8 TB/s，计算平台为 64 TFLOP/s。强度为 20 FLOP/byte 时，带宽给出的上限为 16 TFLOP/s；强度为 160 时给出 128 TFLOP/s，但最终仍被 64 限制。转折点是 80 FLOP/byte。</p>
 <p>图和数字不对应真实产品。把第一个任务换到仅提高计算峰值的设备上，其理想上限仍可能是 16；如果减少一半搬运而不增加运算，强度翻倍，才可能抬高这段上限。</p>
-<h2 id="为什么-decode-容易带宽受限">为什么 Decode 容易带宽受限<a class="anchor" href="#为什么-decode-容易带宽受限" aria-label="链接到本节">#</a></h2>
+<h2 id="03-gpu-basics--为什么-decode-容易带宽受限">为什么 Decode 容易带宽受限<a class="anchor" href="#03-gpu-basics--为什么-decode-容易带宽受限" aria-label="链接到本节">#</a></h2>
 <p>生成阶段常常只推进少量新位置，却需要访问大量模型权重和已有 KV。小 batch 下，一次权重读取服务的 token 少，复用不足，运算强度可能偏低。扩大活跃集合能够提高复用，但同时占用更多缓存和执行时间。</p>
 <p>实际结果依赖架构与长度。长上下文的注意力读取也会变重，不能把所有 decode 都简化成只读权重。应在目标长度分布上查看 kernel 与内存流量。</p>
-<h2 id="cuda-是什么层">CUDA 是什么层<a class="anchor" href="#cuda-是什么层" aria-label="链接到本节">#</a></h2>
+<h2 id="03-gpu-basics--cuda-是什么层">CUDA 是什么层<a class="anchor" href="#03-gpu-basics--cuda-是什么层" aria-label="链接到本节">#</a></h2>
 <p>CUDA 提供设备编程、执行和库支持，上层框架借它提交 GPU 工作。主机通常把任务放入 stream 后继续运行，依赖关系决定哪些任务可重叠。第一次执行还可能有初始化、编译和图捕获，不能混入稳定阶段的计时。</p>
 <p>allocator 保留的内存以及图执行需要的地址稳定性，同样属于这一运行环境。只观察 Python 变量是否消失，无法判断设备是否已完成工作或驱动是否收回空间。</p>
-<h3 id="异步提交为什么容易测出虚假的加速">异步提交为什么容易测出虚假的加速<a class="anchor" href="#异步提交为什么容易测出虚假的加速" aria-label="链接到本节">#</a></h3>
+<h3 id="03-gpu-basics--异步提交为什么容易测出虚假的加速">异步提交为什么容易测出虚假的加速<a class="anchor" href="#03-gpu-basics--异步提交为什么容易测出虚假的加速" aria-label="链接到本节">#</a></h3>
 <p>假设主机提交耗时 30 微秒，设备计算耗时 2 毫秒。只测调用返回可能得到接近 30 微秒，漏掉真正工作。单次设备耗时可用适当的 CUDA 事件测量，端到端延迟则需要在正确边界等待完成。</p>
 <p>每个算子后强制同步虽然容易计时，却会破坏原来的重叠。比较方案前明确是在测单算子、完整步骤还是持续吞吐，并让两边采用同一口径。</p>
-<h2 id="看哪些硬件指标">看哪些硬件指标<a class="anchor" href="#看哪些硬件指标" aria-label="链接到本节">#</a></h2>
+<h2 id="03-gpu-basics--看哪些硬件指标">看哪些硬件指标<a class="anchor" href="#03-gpu-basics--看哪些硬件指标" aria-label="链接到本节">#</a></h2>
 <p>把指标配成问题一起看。设备占用高时，看单位时间完成的有效 token；HBM 流量高时，看是否重复读取或重算；设备空隙多时，看 CPU 供给与同步；频率下降时，检查功率、温度和硬件限制。跨卡步骤变慢，还要测必要互联的流量与等待。</p>
 <p>显存占用只能描述容量，不能回答内存控制器是否繁忙。单一 utilization 曲线也无法分清有用矩阵运算和等待相关的 kernel。</p>
-<h2 id="第一条性能纪律">第一条性能纪律<a class="anchor" href="#第一条性能纪律" aria-label="链接到本节">#</a></h2>
+<h2 id="03-gpu-basics--第一条性能纪律">第一条性能纪律<a class="anchor" href="#03-gpu-basics--第一条性能纪律" aria-label="链接到本节">#</a></h2>
 <p>为档案问答建一份固定负载说明：输入长度分位数、输出上限、请求到达方式、模型与精度、软件版本、卡型和拓扑。每次只改变有明确假设的一项，并同时保存延迟与吞吐结果。</p>
-<h3 id="卡一直忙-为什么请求还很慢">卡一直忙，为什么请求还很慢<a class="anchor" href="#卡一直忙-为什么请求还很慢" aria-label="链接到本节">#</a></h3>
+<h3 id="03-gpu-basics--卡一直忙-为什么请求还很慢">卡一直忙，为什么请求还很慢<a class="anchor" href="#03-gpu-basics--卡一直忙-为什么请求还很慢" aria-label="链接到本节">#</a></h3>
 <p>如果某方案通过频繁抢占和重算让设备始终忙碌，读者仍可能迟迟等不到答案。比较完成请求数、有效输出 token、重算量与排队时间，才能判断利用率提高是否有收益。忙碌时间是资源消耗，交付结果才是工作产出。</p>
-<h2 id="来源入口">来源入口<a class="anchor" href="#来源入口" aria-label="链接到本节">#</a></h2>
+<h2 id="03-gpu-basics--来源入口">来源入口<a class="anchor" href="#03-gpu-basics--来源入口" aria-label="链接到本节">#</a></h2>
 <p>硬件层级与计时限制可查 NVIDIA 的 GPU Performance Background、CUDA C++ Best Practices Guide 和 PyTorch CUDA semantics。Roofline 原始技术报告解释上界模型；FlashAttention 论文可用于核对注意力中的 IO 分块推导。使用资料中的数字前，先确认其设备、精度和实验条件。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">04</div><h1>显存账本：模型到底占多少</h1></header><div class="prose"><p>馆藏问答在加载时只用掉部分显存，几位读者提交长卷宗后却发生 OOM。模型没有变大，增长的是同时存活的请求状态。处理这类问题，需要将常驻内容、随负载变化的内容和执行峰值分开记账。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 410" role="img" aria-label="同一设备，不同工作有不同内存组成"><title>同一设备，不同工作有不同内存组成</title><rect width="960" height="410" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">同一设备，不同工作有不同内存组成</text><text x="30" y="154" font-size="22" fill="#202b32" text-anchor="start">推理</text><rect x="135" y="120" width="230" height="64" fill="#e7eef0" stroke="#bfc8cc"/><text x="147" y="158" font-size="19" fill="#202b32" text-anchor="start">权重</text><rect x="365" y="120" width="220" height="64" fill="#e8e5db" stroke="#bfc8cc"/><text x="377" y="158" font-size="19" fill="#202b32" text-anchor="start">KV</text><rect x="585" y="120" width="150" height="64" fill="#e7eef0" stroke="#bfc8cc"/><text x="597" y="158" font-size="19" fill="#202b32" text-anchor="start">工作区</text><rect x="735" y="120" width="140" height="64" fill="#e8e5db" stroke="#bfc8cc"/><text x="747" y="158" font-size="19" fill="#202b32" text-anchor="start">运行时</text><text x="30" y="294" font-size="22" fill="#202b32" text-anchor="start">训练</text><rect x="135" y="260" width="120" height="64" fill="#e7eef0" stroke="#bfc8cc"/><text x="147" y="298" font-size="19" fill="#202b32" text-anchor="start">参数</text><rect x="255" y="260" width="120" height="64" fill="#e8e5db" stroke="#bfc8cc"/><text x="267" y="298" font-size="19" fill="#202b32" text-anchor="start">梯度</text><rect x="375" y="260" width="300" height="64" fill="#e7eef0" stroke="#bfc8cc"/><text x="387" y="298" font-size="19" fill="#202b32" text-anchor="start">优化器</text><rect x="675" y="260" width="200" height="64" fill="#e8e5db" stroke="#bfc8cc"/><text x="687" y="298" font-size="19" fill="#202b32" text-anchor="start">激活 / 临时</text><text x="135" y="220" font-size="18" fill="#245d79" text-anchor="start">请求长度与并发增加 KV；当前执行形状改变工作区。</text><text x="135" y="360" font-size="17" fill="#56616b" text-anchor="start">示意分类，不按比例；训练的长期状态不能靠减少请求并发消除。</text></g></svg>
 <figcaption>图：相同设备上的两套账：推理增加请求状态，训练增加梯度、优化器与反向所需激活。</figcaption></figure>
 
-<h2 id="推理账本">推理账本<a class="anchor" href="#推理账本" aria-label="链接到本节">#</a></h2>
-<h3 id="权重">权重<a class="anchor" href="#权重" aria-label="链接到本节">#</a></h3>
+<h2 id="04-memory-accounting--推理账本">推理账本<a class="anchor" href="#04-memory-accounting--推理账本" aria-label="链接到本节">#</a></h2>
+<h3 id="04-memory-accounting--权重">权重<a class="anchor" href="#04-memory-accounting--权重" aria-label="链接到本节">#</a></h3>
 <p>参数个数乘存储位数再除以 8，得到权重内容的字节下界。30 亿参数按 16 位约占 5.59 GiB；压成 8 位约为 2.79 GiB，尚未加入量化尺度、对齐和保持高精度的部分。</p>
-<h3 id="kv-cache">KV Cache<a class="anchor" href="#kv-cache" aria-label="链接到本节">#</a></h3>
+<h3 id="04-memory-accounting--kv-cache">KV Cache<a class="anchor" href="#04-memory-accounting--kv-cache" aria-label="链接到本节">#</a></h3>
 <p>每条仍在运行的序列都可能增加历史 key/value。并发数和每条序列的已缓存长度要一起统计。两种流量拥有相同请求数，也可能由于长度差异产生完全不同的缓存压力。</p>
-<h3 id="激活与-workspace">激活与 workspace<a class="anchor" href="#激活与-workspace" aria-label="链接到本节">#</a></h3>
+<h3 id="04-memory-accounting--激活与-workspace">激活与 workspace<a class="anchor" href="#04-memory-accounting--激活与-workspace" aria-label="链接到本节">#</a></h3>
 <p>模型执行会产生当前批次的中间结果，kernel 和通信还需要工作缓冲。这些空间未必长期驻留，却可能决定某一次 forward 能否成功。增加每轮 token 预算会改变这部分峰值。</p>
-<h3 id="运行时保留">运行时保留<a class="anchor" href="#运行时保留" aria-label="链接到本节">#</a></h3>
+<h3 id="04-memory-accounting--运行时保留">运行时保留<a class="anchor" href="#04-memory-accounting--运行时保留" aria-label="链接到本节">#</a></h3>
 <p>设备上下文、分配器缓存和图执行内存池也占空间。有些保留可以复用，有些属于不能轻易让出的运行条件。设备总容量减去权重，并不等于允许 KV 用满的容量。</p>
-<h2 id="训练账本">训练账本<a class="anchor" href="#训练账本" aria-label="链接到本节">#</a></h2>
+<h2 id="04-memory-accounting--训练账本">训练账本<a class="anchor" href="#04-memory-accounting--训练账本" aria-label="链接到本节">#</a></h2>
 <p>反向计算要使用激活，更新参数要使用梯度与优化器状态。一个用于说明量级的混合精度 Adam 方案为：低精度参数 2 bytes、梯度 2 bytes、主参数 4 bytes、两份 FP32 moment 共 8 bytes，即每参数 16 bytes。</p>
 <p>30 亿参数据此需要约 44.70 GiB，还未加入激活和临时空间。具体实现可能没有独立主参数，梯度精度也可能不同，应按真实 tensor 清点，不能把 16 bytes 当作训练通用常数。</p>
-<h3 id="权重放得下-不代表服务容量足够">权重放得下，不代表服务容量足够<a class="anchor" href="#权重放得下-不代表服务容量足够" aria-label="链接到本节">#</a></h3>
+<h3 id="04-memory-accounting--权重放得下-不代表服务容量足够">权重放得下，不代表服务容量足够<a class="anchor" href="#04-memory-accounting--权重放得下-不代表服务容量足够" aria-label="链接到本节">#</a></h3>
 <p>取一张假设的 16 GiB 卡，扣除 5.59 GiB 权重，再预留 2 GiB 给运行时与峰值，约剩 8.41 GiB。这个余额只是 KV 规划的起点，不是已经证明能服务任意长请求。</p>
 <p>如果改做训练，仅长期状态的教学估算就超出这张卡。此时降低在线并发无法解决优化器占用；需要重新考虑训练状态分片、精度或模型规模。</p>
-<h2 id="激活为什么难用一个倍数表达">激活为什么难用一个倍数表达<a class="anchor" href="#激活为什么难用一个倍数表达" aria-label="链接到本节">#</a></h2>
+<h2 id="04-memory-accounting--激活为什么难用一个倍数表达">激活为什么难用一个倍数表达<a class="anchor" href="#04-memory-accounting--激活为什么难用一个倍数表达" aria-label="链接到本节">#</a></h2>
 <p>样本数量、序列长度、层宽以及算子保存哪些结果都会改变激活。注意力实现若避免物化某些大矩阵，峰值也会变化，所以“参数显存乘某倍数”无法覆盖所有形状。</p>
 <p>激活检查点只留部分边界，反向时重新执行部分 forward。它减少的是被舍弃的中间结果，并不自动减少参数、梯度或 Adam moment。采用前应测显存下降和重算增加的时间。</p>
-<h2 id="已分配-已保留与可用">已分配、已保留与可用<a class="anchor" href="#已分配-已保留与可用" aria-label="链接到本节">#</a></h2>
+<h2 id="04-memory-accounting--已分配-已保留与可用">已分配、已保留与可用<a class="anchor" href="#04-memory-accounting--已分配-已保留与可用" aria-label="链接到本节">#</a></h2>
 <p>在 PyTorch 中，allocated 描述活跃 tensor 占用，reserved 描述分配器保留的空间。驱动所见可用容量还受其他进程与运行时影响。三者不是同一层的计数，比较前要统一时间点。</p>
 <p>OOM 信息中的失败分配大小也值得保留：无法再申请一个大连续工作区，与累计小块持续增长，排查方向不同。必要时采集峰值和内存快照，而非只在故障后截取一行 <code>nvidia-smi</code>。</p>
-<h3 id="释放-tensor-后-reserved-为什么没有立刻下降">释放 tensor 后，reserved 为什么没有立刻下降<a class="anchor" href="#释放-tensor-后-reserved-为什么没有立刻下降" aria-label="链接到本节">#</a></h3>
+<h3 id="04-memory-accounting--释放-tensor-后-reserved-为什么没有立刻下降">释放 tensor 后，reserved 为什么没有立刻下降<a class="anchor" href="#04-memory-accounting--释放-tensor-后-reserved-为什么没有立刻下降" aria-label="链接到本节">#</a></h3>
 <p>用完的块可能留在进程分配器里，供下一轮使用。allocated 下降而 reserved 稳定通常符合缓存设计。若列表、闭包或结果缓存仍引用 tensor，它根本没有释放，清理空闲缓存也不能回收这部分。</p>
 <p>可用三个时点做实验：刚加载后、第一轮长输入后、请求结束后。如果结束后活跃占用持续递增，就检查请求资源和引用生命周期；若只在大输入时出现峰值，应先看当前执行形状。</p>
-<h2 id="oom-排查顺序">OOM 排查顺序<a class="anchor" href="#oom-排查顺序" aria-label="链接到本节">#</a></h2>
+<h2 id="04-memory-accounting--oom-排查顺序">OOM 排查顺序<a class="anchor" href="#04-memory-accounting--oom-排查顺序" aria-label="链接到本节">#</a></h2>
 <p>先保存失败请求的实际 token 数、并发、精度和运行配置。再区分权重读取转换时失败、首次执行失败，还是多轮运行后失败。沿对应阶段查找同时存活的对象，确认它是否按预期释放。</p>
 <p>找到增长项后再选动作：权重可考虑量化或分片，KV 可限制总活跃长度，激活可减每轮工作量或重算。只调显存利用比例可能推迟报错，却不能证明增长已受控。</p>
-<h2 id="用计算器建立量级感">用计算器建立量级感<a class="anchor" href="#用计算器建立量级感" aria-label="链接到本节">#</a></h2>
+<h2 id="04-memory-accounting--用计算器建立量级感">用计算器建立量级感<a class="anchor" href="#04-memory-accounting--用计算器建立量级感" aria-label="链接到本节">#</a></h2>
 <pre><code class="language-bash">python3 examples/infra_lab.py memory \
   --parameters 3 --weight-bits 16 \
   --layers 24 --kv-heads 4 --head-dim 96 \
   --context 6144 --concurrent-requests 6
 </code></pre>
 <p>每 token 的常规 KV 下界为 36 KiB。六条请求若都缓存到 6144 个位置，共 36,864 个位置，对应 1.265625 GiB。这是显式最大长度组合，不含分页尾块、工作区或前缀共享。</p>
-<h3 id="预算要留给峰值-而不只是平均">预算要留给峰值，而不只是平均<a class="anchor" href="#预算要留给峰值-而不只是平均" aria-label="链接到本节">#</a></h3>
+<h3 id="04-memory-accounting--预算要留给峰值-而不只是平均">预算要留给峰值，而不只是平均<a class="anchor" href="#04-memory-accounting--预算要留给峰值-而不只是平均" aria-label="链接到本节">#</a></h3>
 <p>平均读者只提交几百 token，并不能排除几份长卷宗同时到达。容量测试应包含这种组合，并检查运行中生成使长度继续增长的情形。用平均上下文乘平均并发只能描述某个平均状态，无法证明峰值安全。</p>
-<h2 id="一条安全规则">一条安全规则<a class="anchor" href="#一条安全规则" aria-label="链接到本节">#</a></h2>
+<h2 id="04-memory-accounting--一条安全规则">一条安全规则<a class="anchor" href="#04-memory-accounting--一条安全规则" aria-label="链接到本节">#</a></h2>
 <p>计算书面预算时，列出未建模的项；做上线验收时，测量同一软件版本上的加载、长输入、突发和退出后的峰值。只有预测与这些观测能相互解释，才继续提高负载。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">05</div><h1>推理的两幕：Prefill 与 Decode</h1></header><div class="prose"><p>读者给出一份日志，要求生成一句日期摘要；另一位只给一个题目，却要生成长篇目录。它们分别把工作集中在读取和续写阶段，不能只用总 token 数判断执行体验。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 445" role="img" aria-label="长输入与长输出：两种不同形状"><title>长输入与长输出：两种不同形状</title><rect width="960" height="445" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">长输入与长输出：两种不同形状</text><text x="30" y="140" font-size="24" fill="#202b32" text-anchor="start">甲</text><rect x="100" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="132" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="164" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="196" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="228" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="260" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="292" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="324" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="356" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="388" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="420" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="452" y="110" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><text x="100" y="96" font-size="18" fill="#245d79" text-anchor="start">输入并行组织：12 个已知位置</text><rect x="519" y="110" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><rect x="559" y="110" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><path d="M547 135 L559 135" stroke="#a14929" stroke-width="2" fill="none"/><polygon points="559.0,135.0 549.8,138.9 549.8,131.1" fill="#a14929"/><rect x="599" y="110" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><path d="M587 135 L599 135" stroke="#a14929" stroke-width="2" fill="none"/><polygon points="599.0,135.0 589.8,138.9 589.8,131.1" fill="#a14929"/><text x="519" y="190" font-size="17" fill="#a14929" text-anchor="start">后续 3 个位置按依赖推进</text><text x="30" y="275" font-size="24" fill="#202b32" text-anchor="start">乙</text><rect x="100" y="245" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="132" y="245" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><rect x="164" y="245" width="28" height="48" fill="#e7eef0" stroke="#245d79"/><text x="100" y="231" font-size="18" fill="#245d79" text-anchor="start">输入并行组织：3 个已知位置</text><rect x="231" y="245" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><rect x="271" y="245" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><path d="M259 270 L271 270" stroke="#a14929" stroke-width="2" fill="none"/><polygon points="271.0,270.0 261.8,273.9 261.8,266.1" fill="#a14929"/><rect x="311" y="245" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><path d="M299 270 L311 270" stroke="#a14929" stroke-width="2" fill="none"/><polygon points="311.0,270.0 301.8,273.9 301.8,266.1" fill="#a14929"/><rect x="351" y="245" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><path d="M339 270 L351 270" stroke="#a14929" stroke-width="2" fill="none"/><polygon points="351.0,270.0 341.8,273.9 341.8,266.1" fill="#a14929"/><rect x="391" y="245" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><path d="M379 270 L391 270" stroke="#a14929" stroke-width="2" fill="none"/><polygon points="391.0,270.0 381.8,273.9 381.8,266.1" fill="#a14929"/><rect x="431" y="245" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><path d="M419 270 L431 270" stroke="#a14929" stroke-width="2" fill="none"/><polygon points="431.0,270.0 421.8,273.9 421.8,266.1" fill="#a14929"/><rect x="471" y="245" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><path d="M459 270 L471 270" stroke="#a14929" stroke-width="2" fill="none"/><polygon points="471.0,270.0 461.8,273.9 461.8,266.1" fill="#a14929"/><rect x="511" y="245" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><path d="M499 270 L511 270" stroke="#a14929" stroke-width="2" fill="none"/><polygon points="511.0,270.0 501.8,273.9 501.8,266.1" fill="#a14929"/><rect x="551" y="245" width="28" height="48" fill="#eee1d7" stroke="#a14929"/><path d="M539 270 L551 270" stroke="#a14929" stroke-width="2" fill="none"/><polygon points="551.0,270.0 541.8,273.9 541.8,266.1" fill="#a14929"/><text x="231" y="325" font-size="17" fill="#a14929" text-anchor="start">后续 9 个位置按依赖推进</text><text x="30" y="405" font-size="18" fill="#56616b" text-anchor="start">格子是位置数，不是等时 GPU 工作；每轮可以混合其他请求。</text></g></svg>
 <figcaption>图：请求甲先处理 12 个输入位置再续写 3 个；请求乙输入 3 个却续写 9 个，顺序依赖不同。</figcaption></figure>
 
-<h2 id="prefill-做什么">Prefill 做什么<a class="anchor" href="#prefill-做什么" aria-label="链接到本节">#</a></h2>
+<h2 id="05-prefill-decode--prefill-做什么">Prefill 做什么<a class="anchor" href="#05-prefill-decode--prefill-做什么" aria-label="链接到本节">#</a></h2>
 <p>模型先处理已有输入，在各层形成后续生成需要的 K/V。输入的多个位置可以组织成较大的矩阵工作，通常具有较多并行机会。因果掩码仍然约束每个位置可读哪些前文，批量处理并未允许它看到未来答案。</p>
 <p>首字时间还包括接入、分词和调度等待。若长卷宗的 prefill 实际只占首字等待的一小部分，继续优化这一段会遇到明显收益上限，应先按请求时间线拆解。</p>
-<h2 id="decode-做什么">Decode 做什么<a class="anchor" href="#decode-做什么" aria-label="链接到本节">#</a></h2>
+<h2 id="05-prefill-decode--decode-做什么">Decode 做什么<a class="anchor" href="#05-prefill-decode--decode-做什么" aria-label="链接到本节">#</a></h2>
 <p>后续新位置依赖先前已经选出的 token。每轮用新位置的输入和已有缓存完成模型计算，再采样决定下一个 token，直到停止标记或长度上限。多个请求可以一起推进，但单条序列的生成依赖仍在。</p>
 <p>相邻输出间隔可以用 ITL 的分布描述，单请求平均生成时间可用 TPOT 描述。若输出超过一个 token，常见计算口径为 <code>(最后 token 时间 - 首 token 时间) / (输出数 - 1)</code>，具体看测量工具定义。短输出不适合盲目比较这个平均数。</p>
-<h3 id="读取长题目和续写长答案-是两种压力">读取长题目和续写长答案，是两种压力<a class="anchor" href="#读取长题目和续写长答案-是两种压力" aria-label="链接到本节">#</a></h3>
+<h3 id="05-prefill-decode--读取长题目和续写长答案-是两种压力">读取长题目和续写长答案，是两种压力<a class="anchor" href="#05-prefill-decode--读取长题目和续写长答案-是两种压力" aria-label="链接到本节">#</a></h3>
 <p>设教学负载甲有 6000 输入、80 输出，乙有 300 输入、1800 输出。甲可能在开口前花较多时间；乙可能很快开始，却连续占据许多生成轮次。相同总耗时也可能呈现完全不同的用户感受。</p>
 <p>把请求按输入和输出二维分桶，能看出首字与持续生成分别受谁影响。仅按总长度分桶会把这两种负载混在一起。</p>
-<h2 id="为什么不能只优化一个阶段">为什么不能只优化一个阶段<a class="anchor" href="#为什么不能只优化一个阶段" aria-label="链接到本节">#</a></h2>
+<h2 id="05-prefill-decode--为什么不能只优化一个阶段">为什么不能只优化一个阶段<a class="anchor" href="#05-prefill-decode--为什么不能只优化一个阶段" aria-label="链接到本节">#</a></h2>
 <p>正在生成的读者希望下一片段准时到达，新来的读者希望尽快开口。若本轮给新长输入过多计算，已有生成可能被推迟；若一直照顾生成，新输入会在队列里等待。</p>
 <p>产品需要分别指定首字和生成间隔目标，并考虑长输入不能永久挨饿。调度器只能在这些目标和资源边界之间取舍，无法通过单个 batch 参数同时消除所有等待。</p>
-<h2 id="chunked-prefill">Chunked Prefill<a class="anchor" href="#chunked-prefill" aria-label="链接到本节">#</a></h2>
+<h2 id="05-prefill-decode--chunked-prefill">Chunked Prefill<a class="anchor" href="#05-prefill-decode--chunked-prefill" aria-label="链接到本节">#</a></h2>
 <p>引擎可把长输入分几轮处理，让尚未完成的输入工作与生成共同使用每轮 token 预算。这样能控制单轮工作量，代价是更多调度边界以及长请求跨轮驻留。</p>
 <p>例如 <code>max_num_batched_tokens</code> 影响每轮可处理的位置数，而不直接给出这一轮耗时。相同 token 数放在不同模型和形状下，执行时间仍会变化，需要测量而不能把预算当作毫秒限额。</p>
-<h3 id="切小-prefill-怎样帮助正在生成的用户">切小 prefill 怎样帮助正在生成的用户<a class="anchor" href="#切小-prefill-怎样帮助正在生成的用户" aria-label="链接到本节">#</a></h3>
+<h3 id="05-prefill-decode--切小-prefill-怎样帮助正在生成的用户">切小 prefill 怎样帮助正在生成的用户<a class="anchor" href="#05-prefill-decode--切小-prefill-怎样帮助正在生成的用户" aria-label="链接到本节">#</a></h3>
 <p>假设本轮有 6 条生成序列，各需推进 1 个位置，另有 960 个输入位置待处理。预算设为 102 时，先为生成分配 6，再给输入 96。输入大约需要十次这样的份额才能读完，期间生成有机会持续推进。</p>
 <p>这只是调度账，没有声称一轮固定多长。若极小分块引入很多管理和执行开销，总吞吐可能下降；应测首字改善是否值得这些成本。</p>
-<h2 id="prefill-decode-分离">Prefill/Decode 分离<a class="anchor" href="#prefill-decode-分离" aria-label="链接到本节">#</a></h2>
+<h2 id="05-prefill-decode--prefill-decode-分离">Prefill/Decode 分离<a class="anchor" href="#05-prefill-decode--prefill-decode-分离" aria-label="链接到本节">#</a></h2>
 <p>分离部署把输入处理和持续生成安排到不同工作组，完成输入处理后再交接历史状态。两边可以采用不同并发和扩缩策略，但也引入状态传输、配对路由和交接失败的处理。</p>
 <p>采用前应证明混合执行确实造成干扰，并测量交接后的排队。负载较低时，两组分别空闲可能比一个共享池更浪费，新增链路也会增加运维复杂度。</p>
-<h2 id="一个简单类比">一个简单类比<a class="anchor" href="#一个简单类比" aria-label="链接到本节">#</a></h2>
+<h2 id="05-prefill-decode--一个简单类比">一个简单类比<a class="anchor" href="#05-prefill-decode--一个简单类比" aria-label="链接到本节">#</a></h2>
 <p>整理档案时，先为一份日志建立索引，再根据索引逐条写注释，类似两类不同形状的工作。这个类比只说明先读取、再依赖历史推进，不能用来推导注意力运算或真实内存占用。</p>
-<h3 id="分离前先算-kv-交接的成本">分离前先算 KV 交接的成本<a class="anchor" href="#分离前先算-kv-交接的成本" aria-label="链接到本节">#</a></h3>
+<h3 id="05-prefill-decode--分离前先算-kv-交接的成本">分离前先算 KV 交接的成本<a class="anchor" href="#05-prefill-decode--分离前先算-kv-交接的成本" aria-label="链接到本节">#</a></h3>
 <p>沿本书模型，6144 个位置、每位置 36 KiB，交接约为 216 MiB 的逻辑 KV。若可用链路吞吐仅 3 GiB/s，忽略其他开销的传输下界也约为 70 毫秒。传几个 token ID 无法替代这份历史状态。</p>
 <p>还需加入源端整理、目标端分配、网络竞争和失败清理。只有独立调度节省的等待与计算超过这些代价，分离才可能带来净收益。</p>
-<h2 id="观测建议">观测建议<a class="anchor" href="#观测建议" aria-label="链接到本节">#</a></h2>
+<h2 id="05-prefill-decode--观测建议">观测建议<a class="anchor" href="#05-prefill-decode--观测建议" aria-label="链接到本节">#</a></h2>
 <p>给每条请求保留输入长度、输出长度、入队等待、输入阶段执行时间和生成间隔。标注是否分块、是否命中前缀缓存以及是否发生状态交接。这样才能区分“读取变快”“不再排队”和“后续写得更平滑”三种不同改善。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">06</div><h1>KV Cache：上下文为什么越来越贵</h1></header><div class="prose"><p>模型在续写一份日志时，还要参考之前的位置。为避免每次从头建立全部历史状态，引擎保留注意力层的 key 和 value。缓存有收益，也有随长度与并发增长的空间成本。</p>
-<h2 id="先记公式">先记公式<a class="anchor" href="#先记公式" aria-label="链接到本节">#</a></h2>
+<h2 id="06-kv-cache--先记公式">先记公式<a class="anchor" href="#06-kv-cache--先记公式" aria-label="链接到本节">#</a></h2>
 <p>对使用常规全注意力、每层配置相同的模型，可以从这条下界开始：</p>
 <pre><code class="language-text">每位置 KV 字节 = 2 × 层数 × KV头数 × 头维度 × 元素字节
 </code></pre>
 <p>本书教学配置为 24 层、4 个 KV head、每头 96 维、每元素 2 bytes，得到 36,864 bytes，即 36 KiB / 位置。6144 个位置对应 216 MiB。公式中的 2 计入 K 和 V，不能在下一步又重复乘一次。</p>
 <p>混合注意力、滑动窗口、不同缓存精度以及并行切分需要分别处理。不能把模型 hidden size 无条件填入 KV head 维度的乘积。</p>
-<h2 id="active-tokens-是什么">Active tokens 是什么<a class="anchor" href="#active-tokens-是什么" aria-label="链接到本节">#</a></h2>
+<h2 id="06-kv-cache--active-tokens-是什么">Active tokens 是什么<a class="anchor" href="#06-kv-cache--active-tokens-是什么" aria-label="链接到本节">#</a></h2>
 <p>这里关注当前仍需保留的历史位置总数。它与输入速率不同，也不等于最大允许长度乘全部用户数。序列持续生成会增大历史，完成、取消或抢占则可能释放或改变其缓存归属。</p>
 <p>前缀共享时，多条逻辑序列可能引用相同物理块。因此逻辑位置计数适合说明工作长度，物理块计数更接近实际占用；监控中应写清二者口径。</p>
-<h3 id="容量统计是一张随时间变化的照片">容量统计是一张随时间变化的照片<a class="anchor" href="#容量统计是一张随时间变化的照片" aria-label="链接到本节">#</a></h3>
+<h3 id="06-kv-cache--容量统计是一张随时间变化的照片">容量统计是一张随时间变化的照片<a class="anchor" href="#06-kv-cache--容量统计是一张随时间变化的照片" aria-label="链接到本节">#</a></h3>
 <p>在某个时点，三条请求各缓存 900、1500 和 2700 个位置，共 5100 个，逻辑 KV 约 179.30 MiB。即使三条的允许上限都为 6144，也没有理由把当前有效内容记成 18,432 个位置。</p>
 <p>下一轮每条增加一个位置，计数又发生变化。要评估容量，既看这种随时间的实际曲线，也要准备允许长度同时接近上限的压力组合。</p>
-<h2 id="连续大块为什么浪费">连续大块为什么浪费<a class="anchor" href="#连续大块为什么浪费" aria-label="链接到本节">#</a></h2>
+<h2 id="06-kv-cache--连续大块为什么浪费">连续大块为什么浪费<a class="anchor" href="#06-kv-cache--连续大块为什么浪费" aria-label="链接到本节">#</a></h2>
 <p>若每条请求启动时都拿走整个最大长度区域，短回答结束前会长期占住未使用部分。长短请求穿插退出，又会留下不便复用的连续空洞。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 455" role="img" aria-label="连续历史，不要求连续物理块"><title>连续历史，不要求连续物理块</title><rect width="960" height="455" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">连续历史，不要求连续物理块</text><text x="30" y="90" font-size="20" fill="#202b32" text-anchor="start">逻辑块顺序</text><text x="600" y="90" font-size="20" fill="#202b32" text-anchor="start">物理池中的位置</text><rect x="70" y="110" width="170" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="84" y="139" font-size="19" fill="#202b32" text-anchor="start">逻辑块 0</text><path d="M240 134 L595 264" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="595.0,264.0 585.0,264.5 587.7,257.2" fill="#245d79"/><rect x="70" y="175" width="170" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="84" y="204" font-size="19" fill="#202b32" text-anchor="start">逻辑块 1</text><path d="M240 199 L595 134" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="595.0,134.0 586.6,139.5 585.2,131.8" fill="#245d79"/><rect x="70" y="240" width="170" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="84" y="269" font-size="19" fill="#202b32" text-anchor="start">逻辑块 2</text><path d="M240 264 L595 329" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="595.0,329.0 585.2,331.2 586.6,323.5" fill="#245d79"/><rect x="70" y="305" width="170" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="84" y="334" font-size="19" fill="#202b32" text-anchor="start">逻辑块 3</text><path d="M240 329 L595 199" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="595.0,199.0 587.7,205.8 585.0,198.5" fill="#245d79"/><rect x="600" y="110" width="240" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="614" y="139" font-size="19" fill="#202b32" text-anchor="start">物理块 2</text><rect x="600" y="175" width="240" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="614" y="204" font-size="19" fill="#202b32" text-anchor="start">物理块 4</text><rect x="600" y="240" width="240" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="614" y="269" font-size="19" fill="#202b32" text-anchor="start">物理块 7</text><rect x="600" y="305" width="240" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="614" y="334" font-size="19" fill="#202b32" text-anchor="start">物理块 9</text><text x="30" y="415" font-size="18" fill="#56616b" text-anchor="start">块表保存映射，物理地址不需要与逻辑顺序相邻。</text></g></svg>
 <figcaption>图：同一序列的四个逻辑块映射到物理池 7、2、9、4，地址不连续但逻辑顺序明确。</figcaption></figure>
 
 <p>分页把逻辑连续性与物理位置分开。请求增长时领取下一块，用块表把逻辑块号映射到物理池；结束时归还可释放块。它改善分配，不会免除有效 K/V 的存储。</p>
-<h2 id="block-大小的权衡">Block 大小的权衡<a class="anchor" href="#block-大小的权衡" aria-label="链接到本节">#</a></h2>
+<h2 id="06-kv-cache--block-大小的权衡">Block 大小的权衡<a class="anchor" href="#06-kv-cache--block-大小的权衡" aria-label="链接到本节">#</a></h2>
 <p>块越大，映射表和分配动作通常越少，但尾部未填满的槽位可能更多。块越小，尾部浪费下降，元数据和访问组织则更细碎。实际引擎还受 kernel 支持、对齐和复用粒度限制。</p>
 <p>改变块大小后，不能只看尾块百分比，还要测执行性能与管理成本。节约少量显存而显著增加访问开销，可能降低服务的有效容量。</p>
-<h2 id="手算分页的最后一块">手算分页的最后一块<a class="anchor" href="#手算分页的最后一块" aria-label="链接到本节">#</a></h2>
+<h2 id="06-kv-cache--手算分页的最后一块">手算分页的最后一块<a class="anchor" href="#06-kv-cache--手算分页的最后一块" aria-label="链接到本节">#</a></h2>
 <p>设每块 8 个槽位，三条不共享的序列长度为 9、14、20。它们需要 2、2、3 块，共 56 个槽位；有效位置为 43 个，未写入槽位为 13 个。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 430" role="img" aria-label="尾块浪费：三条序列逐格核算"><title>尾块浪费：三条序列逐格核算</title><rect width="960" height="430" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">尾块浪费：三条序列逐格核算</text><text x="30" y="90" font-size="19" fill="#202b32" text-anchor="start">每块 8 槽；颜色区分有效内容与尚未写入的尾槽</text><text x="30" y="146" font-size="19" fill="#202b32" text-anchor="start">9 位置</text><rect x="145" y="120" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="172" y="120" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="199" y="120" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="226" y="120" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="253" y="120" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="280" y="120" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="307" y="120" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="334" y="120" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="373" y="120" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="400" y="120" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><rect x="427" y="120" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><rect x="454" y="120" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><rect x="481" y="120" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><rect x="508" y="120" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><rect x="535" y="120" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><rect x="562" y="120" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><text x="840" y="146" font-size="18" fill="#a14929" text-anchor="start">空 7</text><text x="30" y="221" font-size="19" fill="#202b32" text-anchor="start">14 位置</text><rect x="145" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="172" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="199" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="226" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="253" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="280" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="307" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="334" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="373" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="400" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="427" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="454" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="481" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="508" y="195" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="535" y="195" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><rect x="562" y="195" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><text x="840" y="221" font-size="18" fill="#a14929" text-anchor="start">空 2</text><text x="30" y="296" font-size="19" fill="#202b32" text-anchor="start">20 位置</text><rect x="145" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="172" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="199" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="226" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="253" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="280" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="307" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="334" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="373" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="400" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="427" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="454" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="481" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="508" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="535" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="562" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="601" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="628" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="655" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="682" y="270" width="23" height="36" fill="#245d79" stroke="#245d79"/><rect x="709" y="270" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><rect x="736" y="270" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><rect x="763" y="270" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><rect x="790" y="270" width="23" height="36" fill="#f1e5d9" stroke="#a14929"/><text x="840" y="296" font-size="18" fill="#a14929" text-anchor="start">空 4</text><text x="30" y="390" font-size="19" fill="#202b32" text-anchor="start">43 个有效位置 / 56 个分配槽；逻辑内容 1548 KiB，块容量 2016 KiB。</text></g></svg>
 <figcaption>图：8 槽块的占用手算：三行分别留下 7、2、4 个空槽，既显示内容也显示分配容量。</figcaption></figure>
 
 <p>按每槽 36 KiB，逻辑内容为 1548 KiB，完整块容量为 2016 KiB，相差 468 KiB。这里没有计入块表等开销，目的在于明确内容字节与分配字节的区别。</p>
-<h3 id="block-table-怎样保持逻辑连续">block table 怎样保持逻辑连续<a class="anchor" href="#block-table-怎样保持逻辑连续" aria-label="链接到本节">#</a></h3>
+<h3 id="06-kv-cache--block-table-怎样保持逻辑连续">block table 怎样保持逻辑连续<a class="anchor" href="#06-kv-cache--block-table-怎样保持逻辑连续" aria-label="链接到本节">#</a></h3>
 <p>序列第二个逻辑块无须挨着第一个物理块。kernel 根据块表查找正确位置，后续生成只扩充需要的映射。若物理块被其他序列引用，还需维护引用与释放规则，不能因某一请求结束就立即回收共享内容。</p>
 <p>检查一个缓存错误时，可以先核对逻辑位置对应的块号，再确认物理块是否仍归该内容使用。映射存在不代表缓存键正确，内容有效性是另一层条件。</p>
-<h2 id="prefix-caching">Prefix caching<a class="anchor" href="#prefix-caching" aria-label="链接到本节">#</a></h2>
+<h2 id="06-kv-cache--prefix-caching">Prefix caching<a class="anchor" href="#06-kv-cache--prefix-caching" aria-label="链接到本节">#</a></h2>
 <p>多位读者可能使用相同馆藏说明前缀。若对应 token、模型状态和位置条件一致，其前缀计算可被复用。缓存匹配必须覆盖影响结果的配置，如模型版本、adapter、模板和相关多模态输入。</p>
 <p>跨租户复用还涉及隔离和侧信道，不能仅凭字符串相同就默认开放。内容键、可读范围和回收策略都应属于缓存设计。</p>
-<h2 id="抢占与重计算">抢占与重计算<a class="anchor" href="#抢占与重计算" aria-label="链接到本节">#</a></h2>
+<h2 id="06-kv-cache--抢占与重计算">抢占与重计算<a class="anchor" href="#06-kv-cache--抢占与重计算" aria-label="链接到本节">#</a></h2>
 <p>当空间紧张，引擎可能暂停一条序列并释放部分状态，稍后重新计算。这样可让其他请求继续，却把已做工作再次消耗一遍。请求没有 OOM，并不证明系统没有内存压力。</p>
 <p>观察抢占次数、被重算的位置数和生成间隔，能比只看错误率更早发现资源不足。具体是否换出、重算或拒绝，取决于引擎版本与策略。</p>
-<h3 id="前缀共享与最终答案缓存的差别">前缀共享与最终答案缓存的差别<a class="anchor" href="#前缀共享与最终答案缓存的差别" aria-label="链接到本节">#</a></h3>
+<h3 id="06-kv-cache--前缀共享与最终答案缓存的差别">前缀共享与最终答案缓存的差别<a class="anchor" href="#06-kv-cache--前缀共享与最终答案缓存的差别" aria-label="链接到本节">#</a></h3>
 <p>命中共同前缀只省掉对应输入计算。两个读者后续问题不同，系统仍要分别处理后缀和生成，不能直接复用最终答案。命中率提高后，若生成阶段占绝大部分时间，端到端收益也可能有限。</p>
 <p>同样地，压缩权重不会自动压缩 KV。容量实验改变精度时应写清到底改变了哪类 tensor，避免把两个独立动作合并成“模型更小”。</p>
-<h2 id="源码阅读路线">源码阅读路线<a class="anchor" href="#源码阅读路线" aria-label="链接到本节">#</a></h2>
+<h2 id="06-kv-cache--源码阅读路线">源码阅读路线<a class="anchor" href="#06-kv-cache--源码阅读路线" aria-label="链接到本节">#</a></h2>
 <p>先在 <code>vllm/v1/core/kv_cache_manager.py</code> 找申请与释放，再用 <code>vllm/v1/core/block_pool.py</code> 理解物理块管理。配置和尺寸相关逻辑可查 <code>vllm/v1/core/kv_cache_utils.py</code>，实际读取方式则进入 <code>vllm/v1/attention/</code>。</p>
 <p>阅读时带一条会增长、共享、取消的测试序列，核对每个时点的引用和块数，比孤立阅读数据结构更容易发现生命周期。</p>
-<h2 id="常见误区">常见误区<a class="anchor" href="#常见误区" aria-label="链接到本节">#</a></h2>
+<h2 id="06-kv-cache--常见误区">常见误区<a class="anchor" href="#06-kv-cache--常见误区" aria-label="链接到本节">#</a></h2>
 <p>提高允许上下文，只是允许请求增长得更长，不必然意味着启动即按全长分配。设备还有空闲空间，也不证明引擎配置的块池还有可用块。前缀命中节省的是部分计算，分页节省的是分配浪费，两者都不能使无限长并发变得免费。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">07</div><h1>连续批处理：GPU 如何同时服务很多人</h1></header><div class="prose"><p>目录查询只需几个输出位置，档案摘要可能要生成几百个。若整批请求必须等最长的一条结束才换人，已经完成的短任务会留下不可利用的空位。连续批处理在执行边界重新选择工作，让这些位置及时被接替。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-label="按轮重组，而非整批等待"><title>按轮重组，而非整批等待</title><rect width="960" height="420" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">按轮重组，而非整批等待</text><text x="160" y="90" font-size="18" fill="#202b32" text-anchor="start">第 1 轮       第 2 轮       第 3 轮       第 4 轮       第 5 轮</text><text x="60" y="142" font-size="22" fill="#202b32" text-anchor="start">A</text><rect x="155" y="115" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="210" y="141" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="290" y="115" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="345" y="141" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="425" y="115" width="110" height="37" fill="#f2f1eb" stroke="#bfc8cc"/><rect x="560" y="115" width="110" height="37" fill="#f2f1eb" stroke="#bfc8cc"/><rect x="695" y="115" width="110" height="37" fill="#f2f1eb" stroke="#bfc8cc"/><text x="60" y="195" font-size="22" fill="#202b32" text-anchor="start">B</text><rect x="155" y="168" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="210" y="194" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="290" y="168" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="345" y="194" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="425" y="168" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="480" y="194" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="560" y="168" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="615" y="194" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="695" y="168" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="750" y="194" font-size="17" fill="white" text-anchor="middle">执行</text><text x="60" y="248" font-size="22" fill="#202b32" text-anchor="start">C</text><rect x="155" y="221" width="110" height="37" fill="#f2f1eb" stroke="#bfc8cc"/><rect x="290" y="221" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="345" y="247" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="425" y="221" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="480" y="247" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="560" y="221" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="615" y="247" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="695" y="221" width="110" height="37" fill="#f2f1eb" stroke="#bfc8cc"/><text x="60" y="301" font-size="22" fill="#202b32" text-anchor="start">D</text><rect x="155" y="274" width="110" height="37" fill="#f2f1eb" stroke="#bfc8cc"/><rect x="290" y="274" width="110" height="37" fill="#f2f1eb" stroke="#bfc8cc"/><rect x="425" y="274" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="480" y="300" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="560" y="274" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="615" y="300" font-size="17" fill="white" text-anchor="middle">执行</text><rect x="695" y="274" width="110" height="37" fill="#245d79" stroke="#bfc8cc"/><text x="750" y="300" font-size="17" fill="white" text-anchor="middle">执行</text><text x="60" y="375" font-size="18" fill="#202b32" text-anchor="start">A 退出后，D 可在下一轮进入；B 不必结束，批次成员就能改变。</text></g></svg>
 <figcaption>图：按轮观察四条请求：A 在第 2 轮结束，D 从第 3 轮补入；不是等待整批结束。</figcaption></figure>
 
-<h2 id="iteration-level-scheduling">iteration-level scheduling<a class="anchor" href="#iteration-level-scheduling" aria-label="链接到本节">#</a></h2>
+<h2 id="07-continuous-batching--iteration-level-scheduling">iteration-level scheduling<a class="anchor" href="#07-continuous-batching--iteration-level-scheduling" aria-label="链接到本节">#</a></h2>
 <p>每轮开始，引擎根据上轮结果移出已完成项，评估等待项，安排新的输入或生成位置。随后分配缓存、组装设备输入，执行后再更新长度和停止状态。</p>
 <p>这个循环对单条序列仍遵循自回归依赖，但批次成员可以改变。所谓“动态”体现在每轮重组，不是把一个 HTTP 请求重复提交给多个副本。</p>
-<h2 id="三个约束">三个约束<a class="anchor" href="#三个约束" aria-label="链接到本节">#</a></h2>
-<h3 id="token-budget">Token budget<a class="anchor" href="#token-budget" aria-label="链接到本节">#</a></h3>
+<h2 id="07-continuous-batching--三个约束">三个约束<a class="anchor" href="#07-continuous-batching--三个约束" aria-label="链接到本节">#</a></h2>
+<h3 id="07-continuous-batching--token-budget">Token budget<a class="anchor" href="#07-continuous-batching--token-budget" aria-label="链接到本节">#</a></h3>
 <p>本轮处理的位置总数有上限。已有生成序列通常各贡献一个新位置，一段输入块可能贡献许多位置。预算限制的是工作数量，并不保证各轮耗时相同。</p>
-<h3 id="sequence-数量">Sequence 数量<a class="anchor" href="#sequence-数量" aria-label="链接到本节">#</a></h3>
+<h3 id="07-continuous-batching--sequence-数量">Sequence 数量<a class="anchor" href="#07-continuous-batching--sequence-数量" aria-label="链接到本节">#</a></h3>
 <p>同时维护的序列数影响 metadata、调度和状态容量。即使本轮 token 尚有预算，达到序列数上限后也可能不能接纳新请求。监控要分开显示两个计数。</p>
-<h3 id="kv-block">KV block<a class="anchor" href="#kv-block" aria-label="链接到本节">#</a></h3>
+<h3 id="07-continuous-batching--kv-block">KV block<a class="anchor" href="#07-continuous-batching--kv-block" aria-label="链接到本节">#</a></h3>
 <p>执行新增位置前，需要有相应缓存空间。尾块可用槽位与是否需要领取新块也有区别。KV 受限时，增加 token 预算未必能带来任何进展。</p>
-<h3 id="这一轮有-token-预算-为什么还是进不了新请求">这一轮有 token 预算，为什么还是进不了新请求<a class="anchor" href="#这一轮有-token-预算-为什么还是进不了新请求" aria-label="链接到本节">#</a></h3>
+<h3 id="07-continuous-batching--这一轮有-token-预算-为什么还是进不了新请求">这一轮有 token 预算，为什么还是进不了新请求<a class="anchor" href="#07-continuous-batching--这一轮有-token-预算-为什么还是进不了新请求" aria-label="链接到本节">#</a></h3>
 <p>假设本轮预算 48，已有 5 条生成序列，占用 5 个位置。等待中的输入可取 24 个位置，但块池只剩一块，无法容纳它所需的全部新块。剩余 43 个计算名额并不能代替内存。</p>
 <p>已有请求结束并归还可回收块后，新请求才可能进入。还要检查共享引用或缓存保留，不能把逻辑结束数直接当作立刻释放的物理块数。</p>
-<h2 id="策略不是只有-fifo">策略不是只有 FIFO<a class="anchor" href="#策略不是只有-fifo" aria-label="链接到本节">#</a></h2>
+<h2 id="07-continuous-batching--策略不是只有-fifo">策略不是只有 FIFO<a class="anchor" href="#07-continuous-batching--策略不是只有-fifo" aria-label="链接到本节">#</a></h2>
 <p>到达顺序容易解释，却未必满足所有延迟目标。短任务优先可能改善平均完成时间，代价是长卷宗等待更久；优先保障正在生成的请求，则可能推迟新读者的首字。</p>
 <p>为避免高优任务持续涌入导致饥饿，可以设置等待老化、配额或保留份额。具体规则属于产品合同，应通过可重放请求序列验证，而不只把参数写成“高优”。</p>
-<h2 id="为什么吞吐和延迟会冲突">为什么吞吐和延迟会冲突<a class="anchor" href="#为什么吞吐和延迟会冲突" aria-label="链接到本节">#</a></h2>
+<h2 id="07-continuous-batching--为什么吞吐和延迟会冲突">为什么吞吐和延迟会冲突<a class="anchor" href="#07-continuous-batching--为什么吞吐和延迟会冲突" aria-label="链接到本节">#</a></h2>
 <p>更大的批次可能提高权重复用，但为凑批新增的等待会进入用户延迟。低到达率下，等待凑满往往比实际计算更久；高到达率下，积压本身又会形成大批次。</p>
 <p>有效工作点应满足目标长度分布下的首字、生成间隔和成功率，再比较吞吐。不能先把设备灌满，再用最大输出速度代表所有流量。</p>
-<h3 id="最大吞吐实验为什么不代表真实等待">最大吞吐实验为什么不代表真实等待<a class="anchor" href="#最大吞吐实验为什么不代表真实等待" aria-label="链接到本节">#</a></h3>
+<h3 id="07-continuous-batching--最大吞吐实验为什么不代表真实等待">最大吞吐实验为什么不代表真实等待<a class="anchor" href="#07-continuous-batching--最大吞吐实验为什么不代表真实等待" aria-label="链接到本节">#</a></h3>
 <p>封闭式固定并发测试中，一条结束立即补一条，到达节奏随服务完成而变化。开放式固定到达率测试则可能不断积压。两种测试回答的问题不同，应记录采用哪一种，并检查是否存在遗漏过载等待的测量偏差。</p>
 <p>例如平均到达很低却偶有集中导入，稳定阶段高吞吐不足以证明突发首字达标。应保留突发形状和队列长度曲线。</p>
-<h2 id="玩具模拟器">玩具模拟器<a class="anchor" href="#玩具模拟器" aria-label="链接到本节">#</a></h2>
+<h2 id="07-continuous-batching--玩具模拟器">玩具模拟器<a class="anchor" href="#07-continuous-batching--玩具模拟器" aria-label="链接到本节">#</a></h2>
 <pre><code class="language-bash">python3 examples/infra_lab.py simulate
 python3 examples/infra_lab.py check
 </code></pre>
 <p>新版实验用“目录快问、日志摘录、长卷校对”等虚构请求，记录逐轮处理位置与块占用。轮数只比较调度规则，不换算真实时间。</p>
 <p>尝试减少块数并保持 token 预算不变，观察请求为什么等待；再增加预算，检查是否仍受同一块池限制。若没有任何序列可以推进，程序应明确报告资源条件，而不是无限空转。</p>
-<h2 id="vllm-源码地图">vLLM 源码地图<a class="anchor" href="#vllm-源码地图" aria-label="链接到本节">#</a></h2>
+<h2 id="07-continuous-batching--vllm-源码地图">vLLM 源码地图<a class="anchor" href="#07-continuous-batching--vllm-源码地图" aria-label="链接到本节">#</a></h2>
 <p><code>vllm/v1/core/sched/scheduler.py</code> 组织调度选择及输出，<code>vllm/v1/engine/core.py</code> 把选择与执行、结果更新连起来，<code>vllm/v1/worker/gpu_model_runner.py</code> 处理设备侧输入和执行。三者之间的数据对象比某个单独函数名更值得追踪。</p>
-<h3 id="读调度源码时追一条请求的资源变化">读调度源码时追一条请求的资源变化<a class="anchor" href="#读调度源码时追一条请求的资源变化" aria-label="链接到本节">#</a></h3>
+<h3 id="07-continuous-batching--读调度源码时追一条请求的资源变化">读调度源码时追一条请求的资源变化<a class="anchor" href="#07-continuous-batching--读调度源码时追一条请求的资源变化" aria-label="链接到本节">#</a></h3>
 <p>从等待请求开始，记下选中时已处理长度、本轮分配位置数与新增块数；执行结果返回后再检查长度是否前进，停止时检查资源如何退回。若选中却无进展，查执行或更新；若完成后占用不降，查释放及缓存引用。</p>
 <p>模拟器也应遵循这些不变量，但它没有设备输入布局、通信或真实 kernel，不能代替引擎性能实验。</p>
-<h2 id="benchmark-应记录什么">Benchmark 应记录什么<a class="anchor" href="#benchmark-应记录什么" aria-label="链接到本节">#</a></h2>
+<h2 id="07-continuous-batching--benchmark-应记录什么">Benchmark 应记录什么<a class="anchor" href="#07-continuous-batching--benchmark-应记录什么" aria-label="链接到本节">#</a></h2>
 <p>为每次实验固定模型与精度、模板、输入输出分布、到达方式、并发上限、每轮预算、块池和缓存策略。结果同时给出完成请求速率、有效输入输出 token 速率及延迟分位数。增加重试、拒绝和取消统计，防止靠丢弃困难请求获得漂亮平均数。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">08</div><h1>模型加载、精度与量化</h1></header><div class="prose"><p>档案问答的进程已经启动，却还不能接待读者。模型文件必须被识别、读取、转换并放到正确设备，执行路径还要完成预热。服务发布需要测量这一整段准备时间，不能只测容器启动。</p>
-<h2 id="冷启动发生了什么">冷启动发生了什么<a class="anchor" href="#冷启动发生了什么" aria-label="链接到本节">#</a></h2>
+<h2 id="08-loading-quantization--冷启动发生了什么">冷启动发生了什么<a class="anchor" href="#08-loading-quantization--冷启动发生了什么" aria-label="链接到本节">#</a></h2>
 <p>配置首先决定模型结构和加载方式，随后读取权重分片，建立参数映射，将内容送入设备，并准备缓存与工作区。某些运行方式还会编译 kernel、捕获图或执行预热。不同阶段可能重叠，也可能产生暂时同时存在的副本。</p>
 <p>把存储来源写入启动日志。远端对象、本地 SSD 和操作系统页缓存的表现不同；第二次启动较快可能只是缓存命中。扩容设计应包含真正冷启动，而非只复用一台已热的节点。</p>
-<h2 id="权重格式">权重格式<a class="anchor" href="#权重格式" aria-label="链接到本节">#</a></h2>
+<h2 id="08-loading-quantization--权重格式">权重格式<a class="anchor" href="#08-loading-quantization--权重格式" aria-label="链接到本节">#</a></h2>
 <p>加载器需要知道每个 tensor 属于哪个参数，哪些权重共享，以及当前 rank 应拿到哪个切片。可分片和可映射的格式有利于控制读取量，但格式支持并不保证框架采用最省内存的路径。</p>
 <p>模型仓库中的自定义代码还构成执行边界。进入生产前固定版本，核查需要运行的代码及文件来源。权重下载成功不能替代供应链检查。</p>
-<h2 id="量化到底减少什么">量化到底减少什么<a class="anchor" href="#量化到底减少什么" aria-label="链接到本节">#</a></h2>
+<h2 id="08-loading-quantization--量化到底减少什么">量化到底减少什么<a class="anchor" href="#08-loading-quantization--量化到底减少什么" aria-label="链接到本节">#</a></h2>
 <p>以 30 亿参数计算，16 位内容约 5.59 GiB，8 位约 2.79 GiB，4 位约 1.40 GiB。这些只是理想权重内容，实际还需 scale、打包信息和未量化层。</p>
 <p>若原工作受权重搬运限制，减少读取字节可能加快生成；若省下的空间用作 KV，也可能增加可服务的并发。两种收益要分别验证，不能从文件缩小直接推出速度按比例提高。</p>
-<h3 id="权重压缩以后-剩下的空间去哪里">权重压缩以后，剩下的空间去哪里<a class="anchor" href="#权重压缩以后-剩下的空间去哪里" aria-label="链接到本节">#</a></h3>
+<h3 id="08-loading-quantization--权重压缩以后-剩下的空间去哪里">权重压缩以后，剩下的空间去哪里<a class="anchor" href="#08-loading-quantization--权重压缩以后-剩下的空间去哪里" aria-label="链接到本节">#</a></h3>
 <p>假设从 16 位切到 8 位，理论节省约 2.79 GiB。可以将一部分留作工作峰值余量，另一部分扩大缓存池，但 KV 精度若不变，每个历史位置仍需原来的字节。</p>
 <p>加载过程中还可能先建立高精度副本再转换。因此磁盘文件尺寸、稳定驻留尺寸和转换峰值应单列测量。若只看量化文件大小，就可能在首次启动时遇到意外 OOM。</p>
-<h2 id="为什么更小不一定更快">为什么更小不一定更快<a class="anchor" href="#为什么更小不一定更快" aria-label="链接到本节">#</a></h2>
+<figure class="diagram" tabindex="0" data-review-figure="infra-quantization">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 488" role="img" aria-labelledby="08-loading-quantization--infra-quantization-title 08-loading-quantization--infra-quantization-desc" style="display:block;width:100%;min-width:620px;height:auto">
+<title id="08-loading-quantization--infra-quantization-title">30 亿参数：位宽减半，理想权重内容减半</title>
+<desc id="08-loading-quantization--infra-quantization-desc">30亿参数的16位、8位、4位理想权重内容分别约5.59、2.79、1.40 GiB；未计算额外状态，不能推断实际速度。</desc>
+<rect width="960" height="488" fill="var(--paper,#faf8f1)"/>
+<g font-family="'IBM Plex Sans','Noto Sans CJK SC',system-ui,sans-serif"><text x="40" y="48" font-size="28" fill="var(--ink,#243b48)" text-anchor="start">30 亿参数：位宽减半，理想权重内容减半</text><text x="40" y="96" font-size="18" fill="var(--muted,#536772)" text-anchor="start">理想权重内容 / GiB</text><path d="M240 120V372" stroke="var(--line,var(--rule,#d9ded8))"/><text x="240" y="404" font-size="18" fill="var(--muted,#536772)" text-anchor="middle">0</text><path d="M336 120V372" stroke="var(--line,var(--rule,#d9ded8))"/><text x="336" y="404" font-size="18" fill="var(--muted,#536772)" text-anchor="middle">1</text><path d="M432 120V372" stroke="var(--line,var(--rule,#d9ded8))"/><text x="432" y="404" font-size="18" fill="var(--muted,#536772)" text-anchor="middle">2</text><path d="M528 120V372" stroke="var(--line,var(--rule,#d9ded8))"/><text x="528" y="404" font-size="18" fill="var(--muted,#536772)" text-anchor="middle">3</text><path d="M624 120V372" stroke="var(--line,var(--rule,#d9ded8))"/><text x="624" y="404" font-size="18" fill="var(--muted,#536772)" text-anchor="middle">4</text><path d="M720 120V372" stroke="var(--line,var(--rule,#d9ded8))"/><text x="720" y="404" font-size="18" fill="var(--muted,#536772)" text-anchor="middle">5</text><path d="M816 120V372" stroke="var(--line,var(--rule,#d9ded8))"/><text x="816" y="404" font-size="18" fill="var(--muted,#536772)" text-anchor="middle">6</text><text x="40" y="176" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">16 位</text><rect x="240" y="144" width="536.4418029785156" height="48" rx="6" fill="var(--paper-2,var(--paper-deep,#e7edf2))" stroke="var(--muted,#536772)"/><text x="792.4418029785156" y="175" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">5.59 GiB</text><text x="40" y="256" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">8 位</text><rect x="240" y="224" width="268.2209014892578" height="48" rx="6" fill="var(--paper-2,var(--paper-deep,#e7edf2))" stroke="var(--muted,#536772)"/><text x="524.2209014892578" y="255" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">2.79 GiB</text><text x="40" y="336" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">4 位</text><rect x="240" y="304" width="134.1104507446289" height="48" rx="6" fill="var(--paper-2,var(--paper-deep,#e5ede9))" stroke="var(--muted,#536772)"/><text x="390.1104507446289" y="335" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">1.40 GiB</text><text x="40" y="456" font-size="18" fill="var(--muted,#536772)" text-anchor="start">不含 scale、未量化层、KV、工作区和转换峰值；不表示速度比例。</text></g>
+</svg>
+<figcaption>图：同一零起点和 GiB 刻度；条长按 parameters × bits / 8 换算。</figcaption>
+</figure>
+
+<h2 id="08-loading-quantization--为什么更小不一定更快">为什么更小不一定更快<a class="anchor" href="#08-loading-quantization--为什么更小不一定更快" aria-label="链接到本节">#</a></h2>
 <p>低比特内容需要匹配的打包布局与高效 kernel，某些路径还会做反量化。若目标设备不支持高效实现，或算子回退、频繁转换，节省的读取可能被额外工作抵消。</p>
 <p>还要先确认瓶颈位置。排队或 CPU 分词主导的短请求，不会因权重读取改善而同比加速；输入阶段与生成阶段也可能对同一种量化有不同收益。</p>
-<h2 id="精度是系统合同">精度是系统合同<a class="anchor" href="#精度是系统合同" aria-label="链接到本节">#</a></h2>
+<h2 id="08-loading-quantization--精度是系统合同">精度是系统合同<a class="anchor" href="#08-loading-quantization--精度是系统合同" aria-label="链接到本节">#</a></h2>
 <p>一份可复现配置应说明权重表示、量化方法与分组方式、激活和 KV 精度、累加精度，以及目标 kernel 和设备支持。只写“低比特模型”无法判断它减少哪类占用。</p>
 <p>质量检查与速度检查都需基线。档案中的日期、数字、少见地名和引用可能对精度变化敏感，不能只用几个日常问候验证可用性。</p>
-<h3 id="精度合同要覆盖输入到-kernel-的整条路">精度合同要覆盖输入到 kernel 的整条路<a class="anchor" href="#精度合同要覆盖输入到-kernel-的整条路" aria-label="链接到本节">#</a></h3>
+<h3 id="08-loading-quantization--精度合同要覆盖输入到-kernel-的整条路">精度合同要覆盖输入到 kernel 的整条路<a class="anchor" href="#08-loading-quantization--精度合同要覆盖输入到-kernel-的整条路" aria-label="链接到本节">#</a></h3>
 <p>例如权重按组保存 scale，加载器必须以相同分组解释内容，kernel 又需对应布局。错配可能直接报错，也可能悄悄走不同执行路径。确认配置被接受后，还要检查实际选择的实现。</p>
 <p>对代表性任务比较输出错误与异常数值，同时用相同长度和到达过程比较延迟。一个速度改善结论不能顺带证明任务质量未变。</p>
-<h2 id="模型加载的分布式问题">模型加载的分布式问题<a class="anchor" href="#模型加载的分布式问题" aria-label="链接到本节">#</a></h2>
+<h2 id="08-loading-quantization--模型加载的分布式问题">模型加载的分布式问题<a class="anchor" href="#08-loading-quantization--模型加载的分布式问题" aria-label="链接到本节">#</a></h2>
 <p>各 rank 独立读取分片会把压力放到存储，集中读取再分发则把压力转到网络和分发者。是否值得预先切片，还取决于权重布局是否与实际 TP、PP 配置匹配。</p>
 <p>同时启动很多工作组时，本地每组的加载很快也可能形成远端读取风暴。应限制准备并发、观察存储吞吐，并把失败重试的放大量计入容量。</p>
-<h2 id="热更新与滚动发布">热更新与滚动发布<a class="anchor" href="#热更新与滚动发布" aria-label="链接到本节">#</a></h2>
+<h2 id="08-loading-quantization--热更新与滚动发布">热更新与滚动发布<a class="anchor" href="#08-loading-quantization--热更新与滚动发布" aria-label="链接到本节">#</a></h2>
 <p>新版本必须完成加载、执行检查和必要预热后才进入就绪集合。旧版本停止接新请求，再为仍在生成的请求留出排空窗口。模型、tokenizer、聊天模板和 adapter 应作为一致版本组合交付。</p>
 <p>更新计划也应保留旧镜像、权重与配置。仅修改服务标签而旧文件已经删除，并不具备真正可执行的回滚路径。</p>
-<h3 id="滚动更新为什么需要额外容量">滚动更新为什么需要额外容量<a class="anchor" href="#滚动更新为什么需要额外容量" aria-label="链接到本节">#</a></h3>
+<h3 id="08-loading-quantization--滚动更新为什么需要额外容量">滚动更新为什么需要额外容量<a class="anchor" href="#08-loading-quantization--滚动更新为什么需要额外容量" aria-label="链接到本节">#</a></h3>
 <p>两个旧副本各自占卡，新副本预热时还需要自己的设备。如果没有额外容量，就必须接受分批减少在线能力或预先调整发布方案。<code>maxSurge</code> 之类参数不会凭空生成 GPU。</p>
 <p>多 rank 副本要整组准备和切换。不能把一组中的部分 rank 升级后，仍让它们共同处理请求；版本一致性必须覆盖组内所有参与者。</p>
-<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<h2 id="08-loading-quantization--源码入口">源码入口<a class="anchor" href="#08-loading-quantization--源码入口" aria-label="链接到本节">#</a></h2>
 <p>从 <code>vllm/model_executor/model_loader/</code> 检查配置怎样选择读取与映射路径，再到 <code>vllm/model_executor/layers/quantization/</code> 核对量化表示与执行条件。训练相关可查 <code>torchtitan/quantization/</code> 及 <code>torchtitan/models/</code>。先找实际被选中的实现，再阅读底层细节，避免分析一条根本没启用的优化路径。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">09</div><h1>多卡不是一个开关</h1></header><div class="prose"><p>夜间校对模型装不进一张卡，白天问答又需要更多吞吐。这是两类需求：前者可能要拆开一个模型，后者可能只要复制更多独立副本。先确定切分对象，才能知道哪些卡必须共同参与同一步。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 435" role="img" aria-label="不同切分，改变不同的数据归属"><title>不同切分，改变不同的数据归属</title><rect width="960" height="435" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">不同切分，改变不同的数据归属</text><text x="30" y="93" font-size="18" fill="#245d79" text-anchor="start">切分</text><text x="150" y="93" font-size="18" fill="#245d79" text-anchor="start">分给谁</text><text x="420" y="93" font-size="18" fill="#245d79" text-anchor="start">逻辑关系</text><text x="690" y="93" font-size="18" fill="#245d79" text-anchor="start">主要交接</text><path d="M30 154 L930 154" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="135" font-size="18" fill="#202b32" text-anchor="start">DP</text><text x="150" y="135" font-size="18" fill="#202b32" text-anchor="start">不同请求 / 样本</text><text x="420" y="135" font-size="18" fill="#202b32" text-anchor="start">模型副本</text><text x="690" y="135" font-size="18" fill="#202b32" text-anchor="start">训练梯度同步</text><path d="M30 209 L930 209" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="190" font-size="18" fill="#202b32" text-anchor="start">TP</text><text x="150" y="190" font-size="18" fill="#202b32" text-anchor="start">一层内矩阵片段</text><text x="420" y="190" font-size="18" fill="#202b32" text-anchor="start">同一请求协作</text><text x="690" y="190" font-size="18" fill="#202b32" text-anchor="start">层内结果交换</text><path d="M30 264 L930 264" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="245" font-size="18" fill="#202b32" text-anchor="start">PP</text><text x="150" y="245" font-size="18" fill="#202b32" text-anchor="start">不同层区间</text><text x="420" y="245" font-size="18" fill="#202b32" text-anchor="start">激活依次前进</text><text x="690" y="245" font-size="18" fill="#202b32" text-anchor="start">stage 边界传输</text><path d="M30 319 L930 319" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="300" font-size="18" fill="#202b32" text-anchor="start">CP</text><text x="150" y="300" font-size="18" fill="#202b32" text-anchor="start">不同序列位置</text><text x="420" y="300" font-size="18" fill="#202b32" text-anchor="start">跨位置注意力</text><text x="690" y="300" font-size="18" fill="#202b32" text-anchor="start">注意力信息</text><path d="M30 374 L930 374" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="30" y="355" font-size="18" fill="#202b32" text-anchor="start">EP</text><text x="150" y="355" font-size="18" fill="#202b32" text-anchor="start">不同专家</text><text x="420" y="355" font-size="18" fill="#202b32" text-anchor="start">token 按 router 分发</text><text x="690" y="355" font-size="18" fill="#202b32" text-anchor="start">定向收发 / AllToAll</text></g></svg>
 <figcaption>图：用工作归属矩阵区分切数据、切矩阵、切层、切序列和切专家；每行标出需要交换的内容。</figcaption></figure>
 
-<h2 id="数据并行-dp">数据并行 DP<a class="anchor" href="#数据并行-dp" aria-label="链接到本节">#</a></h2>
+<h2 id="09-parallelism--数据并行-dp">数据并行 DP<a class="anchor" href="#09-parallelism--数据并行-dp" aria-label="链接到本节">#</a></h2>
 <p>不同副本处理不同样本或请求。在线推理时，副本通常独立完成自己的请求，主要扩大总服务能力；同步训练时，各副本在更新前还要对梯度达成一致。</p>
 <p>每个未分片副本仍需完整模型。因此增加 DP 不能解决单份模型装不下的问题，训练中还要为梯度同步付出通信成本。</p>
-<h2 id="张量并行-tp">张量并行 TP<a class="anchor" href="#张量并行-tp" aria-label="链接到本节">#</a></h2>
+<h2 id="09-parallelism--张量并行-tp">张量并行 TP<a class="anchor" href="#09-parallelism--张量并行-tp" aria-label="链接到本节">#</a></h2>
 <p>把同一层的矩阵运算拆给多个参与者。每张卡产生完整逻辑结果的一部分，中间需要按算子布局进行归约或收集。它减少部分每卡权重和计算，却增加频繁的层内通信。</p>
 <p>矩阵尺寸、注意力头和 kernel 对划分有具体要求。TP 越大，每张卡的工作可能越小，通信与启动成本占比反而升高，因此不是越多越快。</p>
-<h3 id="两卡切矩阵-与两卡各跑请求有什么不同">两卡切矩阵，与两卡各跑请求有什么不同<a class="anchor" href="#两卡切矩阵-与两卡各跑请求有什么不同" aria-label="链接到本节">#</a></h3>
+<h3 id="09-parallelism--两卡切矩阵-与两卡各跑请求有什么不同">两卡切矩阵，与两卡各跑请求有什么不同<a class="anchor" href="#09-parallelism--两卡切矩阵-与两卡各跑请求有什么不同" aria-label="链接到本节">#</a></h3>
 <p>设输入长度为 6，矩阵输出宽度为 10。把输出列切成两组，每卡得到宽度 5 的结果，后续计算需要按布局组合，单个请求离不开双方。若两卡都保留完整宽度 10 的矩阵，各处理不同日志，则是独立副本。</p>
 <p>故障影响也不同：前者丢一张卡会破坏这个逻辑副本，后者通常只损失一个独立服务者。部署与健康检查要按实际副本边界设计。</p>
-<h2 id="流水线并行-pp">流水线并行 PP<a class="anchor" href="#流水线并行-pp" aria-label="链接到本节">#</a></h2>
+<h2 id="09-parallelism--流水线并行-pp">流水线并行 PP<a class="anchor" href="#09-parallelism--流水线并行-pp" aria-label="链接到本节">#</a></h2>
 <p>把层划为多个 stage，激活依次传递。每个 stage 只保留自己的层，但单条数据仍要经过完整顺序。多个 micro-batch 可交错填流水线，开始和结束阶段仍会有空泡。</p>
 <p>选择 stage 时既看参数大小，也看实际计算耗时。均分层数不保证均分工作，嵌入、输出头和不同层结构都可能造成失衡。</p>
-<h2 id="上下文并行-cp">上下文并行 CP<a class="anchor" href="#上下文并行-cp" aria-label="链接到本节">#</a></h2>
+<h2 id="09-parallelism--上下文并行-cp">上下文并行 CP<a class="anchor" href="#09-parallelism--上下文并行-cp" aria-label="链接到本节">#</a></h2>
 <p>超长序列可以沿位置维度拆分，使每个参与者保存或计算部分序列。注意力仍需获得跨分片的信息，因此需要专门交换与计算组织。它并非把一句话机械拆成几个互不相关的小问题。</p>
 <p>具体能减少哪些激活或 KV、怎样通信，要核对目标框架和模型实现，不应凭名称推导全部状态都均分。</p>
-<h2 id="专家并行-ep">专家并行 EP<a class="anchor" href="#专家并行-ep" aria-label="链接到本节">#</a></h2>
+<h2 id="09-parallelism--专家并行-ep">专家并行 EP<a class="anchor" href="#09-parallelism--专家并行-ep" aria-label="链接到本节">#</a></h2>
 <p>MoE 将专家分布到不同设备，router 决定 token 发往哪些专家，执行后再组合结果。常见传输涉及 AllToAll 类型的数据分发。</p>
 <p>如果很多 token 集中到少数专家，某些设备会成为热点，其他设备即使有空也要等待。容量评估应包含实际路由分布与失衡，而非只用平均专家负载。</p>
-<h2 id="并行可以组合">并行可以组合<a class="anchor" href="#并行可以组合" aria-label="链接到本节">#</a></h2>
+<h2 id="09-parallelism--并行可以组合">并行可以组合<a class="anchor" href="#09-parallelism--并行可以组合" aria-label="链接到本节">#</a></h2>
 <p>简单的 DP、TP、PP 布局可用三个坐标表达。例如 <code>(数据副本, stage, 张量分片)</code> 确定一个 rank 的职责。长序列和 MoE 加入后，维度的依赖与分组规则由框架决定，不能不加条件地相乘所有缩写。</p>
 <p>先列每张卡保存哪些参数、处理哪些样本，再列它属于哪些通信组。随后把这些组映射到节点内外的真实链路。</p>
-<h3 id="device-mesh-的坐标决定谁和谁通信">device mesh 的坐标决定谁和谁通信<a class="anchor" href="#device-mesh-的坐标决定谁和谁通信" aria-label="链接到本节">#</a></h3>
+<h3 id="09-parallelism--device-mesh-的坐标决定谁和谁通信">device mesh 的坐标决定谁和谁通信<a class="anchor" href="#09-parallelism--device-mesh-的坐标决定谁和谁通信" aria-label="链接到本节">#</a></h3>
 <p>假设 DP=2、TP=2，每个副本内部的两卡执行层内通信，两个副本中对应分片还可能在训练中同步。编号连续只是命名，不能保证物理上相邻。</p>
 <p>把频繁通信的 TP 组放到快链路内通常更合理，但仍要实测。设备数量满足乘积只是必要条件，拓扑和显存峰值同样约束布局。</p>
-<h2 id="一个-8-卡例子">一个 8 卡例子<a class="anchor" href="#一个-8-卡例子" aria-label="链接到本节">#</a></h2>
+<h2 id="09-parallelism--一个-8-卡例子">一个 8 卡例子<a class="anchor" href="#09-parallelism--一个-8-卡例子" aria-label="链接到本节">#</a></h2>
 <p>考虑教学模型含 180 亿参数，16 位权重下界约 33.53 GiB，目标卡各有 24 GiB。单卡放不下，理想 TP=2 时每卡权重约 16.76 GiB，剩余还要容纳缓存与工作区。</p>
 <p>八张卡可以候选组成四个两卡副本，但这只是待测试布局。若组内互联差，或长输入峰值超过余额，仍需调整并行、精度或负载。图中的八卡不对应特定产品。</p>
-<h2 id="推理与训练的同名差异">推理与训练的同名差异<a class="anchor" href="#推理与训练的同名差异" aria-label="链接到本节">#</a></h2>
+<h2 id="09-parallelism--推理与训练的同名差异">推理与训练的同名差异<a class="anchor" href="#09-parallelism--推理与训练的同名差异" aria-label="链接到本节">#</a></h2>
 <p>训练往往用规律 micro-batch 持续执行，在线服务则不断接入、退出和改变长度，还要保护用户延迟。相同 TP 和 PP 名称不会使两者拥有相同最佳参数。</p>
 <p>训练可用许多 micro-batch 填流水线；在线单请求的每个生成位置都需经过各 stage，其逐 token 延迟可能不理想。应分别评估吞吐与单请求体验。</p>
-<h3 id="只做权重除法会漏掉通信和峰值">只做权重除法会漏掉通信和峰值<a class="anchor" href="#只做权重除法会漏掉通信和峰值" aria-label="链接到本节">#</a></h3>
+<h3 id="09-parallelism--只做权重除法会漏掉通信和峰值">只做权重除法会漏掉通信和峰值<a class="anchor" href="#09-parallelism--只做权重除法会漏掉通信和峰值" aria-label="链接到本节">#</a></h3>
 <p>上例每卡 16.76 GiB 只是理想权重分摊。某些参数或状态可能复制，层内归约还需 buffer，缓存能否均分也依赖实现。加载成功后，还需测长上下文、批次峰值与必要 collective 的时间。</p>
 <p>若增加卡后更慢，检查每卡工作是否变得过小、通信频率是否过高，或 stage 是否不平衡。继续增加同类资源可能放大原来的等待。</p>
-<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<h2 id="09-parallelism--源码入口">源码入口<a class="anchor" href="#09-parallelism--源码入口" aria-label="链接到本节">#</a></h2>
 <p>在 <code>megatron/core/parallel_state.py</code> 追进程组构造，在 <code>megatron/core/tensor_parallel/</code> 与 <code>megatron/core/pipeline_parallel/</code> 看实际工作划分。TorchTitan 的维度说明位于 <code>torchtitan/distributed/parallel_dims.py</code>，推理组管理可从 <code>vllm/distributed/</code> 查起。带着一组具体 rank 坐标阅读，核对每次通信的参与者。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">10</div><h1>Collective：GPU 之间怎样交换数据</h1></header><div class="prose"><p>分片后的计算只有局部结果。某一步需要完整参数，另一步只需各方贡献的和，还有一步要把 token 送到不同专家。这些数据关系由 collective 定义，NCCL 等实现负责在设备和链路上高效完成。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 460" role="img" aria-label="同样输入，四种数据合同"><title>同样输入，四种数据合同</title><rect width="960" height="460" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">同样输入，四种数据合同</text><text x="30" y="90" font-size="21" fill="#202b32" text-anchor="start">输入：rank 0 = [2,7]；rank 1 = [5,1]</text><text x="30" y="153" font-size="20" fill="#202b32" text-anchor="start">sum AllReduce</text><rect x="350" y="125" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="364" y="154" font-size="19" fill="#202b32" text-anchor="start">[7,8]</text><rect x="650" y="125" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="664" y="154" font-size="19" fill="#202b32" text-anchor="start">[7,8]</text><text x="30" y="223" font-size="20" fill="#202b32" text-anchor="start">AllGather</text><rect x="350" y="195" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="364" y="224" font-size="19" fill="#202b32" text-anchor="start">[2,7,5,1]</text><rect x="650" y="195" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="664" y="224" font-size="19" fill="#202b32" text-anchor="start">[2,7,5,1]</text><text x="30" y="293" font-size="20" fill="#202b32" text-anchor="start">ReduceScatter</text><rect x="350" y="265" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="364" y="294" font-size="19" fill="#202b32" text-anchor="start">[7]</text><rect x="650" y="265" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="664" y="294" font-size="19" fill="#202b32" text-anchor="start">[8]</text><text x="30" y="363" font-size="20" fill="#202b32" text-anchor="start">AllToAll</text><rect x="350" y="335" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="364" y="364" font-size="19" fill="#202b32" text-anchor="start">[2,5]</text><rect x="650" y="335" width="230" height="48" fill="#e7eef0" stroke="#bfc8cc"/><text x="664" y="364" font-size="19" fill="#202b32" text-anchor="start">[7,1]</text><text x="380" y="420" font-size="16" fill="#56616b" text-anchor="start">rank 0 输出</text><text x="680" y="420" font-size="16" fill="#56616b" text-anchor="start">rank 1 输出</text></g></svg>
 <figcaption>图：两位参与者输入 [2,7] 与 [5,1]，分别展示相加、拼接、归约后分片和定向交换。</figcaption></figure>
 
-<h2 id="四个最常见操作">四个最常见操作<a class="anchor" href="#四个最常见操作" aria-label="链接到本节">#</a></h2>
-<h3 id="allreduce">AllReduce<a class="anchor" href="#allreduce" aria-label="链接到本节">#</a></h3>
+<h2 id="10-collectives--四个最常见操作">四个最常见操作<a class="anchor" href="#10-collectives--四个最常见操作" aria-label="链接到本节">#</a></h2>
+<h3 id="10-collectives--allreduce">AllReduce<a class="anchor" href="#10-collectives--allreduce" aria-label="链接到本节">#</a></h3>
 <p>每个参与者提供同形状输入，按照约定操作归约，随后每方得到完整归约结果。例如 sum 用于合并梯度贡献。结果是和还是均值，取决于操作与后续缩放，不能从名称直接假定平均。</p>
-<h3 id="allgather">AllGather<a class="anchor" href="#allgather" aria-label="链接到本节">#</a></h3>
+<h3 id="10-collectives--allgather">AllGather<a class="anchor" href="#10-collectives--allgather" aria-label="链接到本节">#</a></h3>
 <p>各方提供自己的片段，所有参与者获得按顺序组成的集合。它搬运和组合内容，不替你做逐元素加法。分片参数在某些计算前需要这种组装。</p>
-<h3 id="reducescatter">ReduceScatter<a class="anchor" href="#reducescatter" aria-label="链接到本节">#</a></h3>
+<h3 id="10-collectives--reducescatter">ReduceScatter<a class="anchor" href="#10-collectives--reducescatter" aria-label="链接到本节">#</a></h3>
 <p>先把各方贡献归约，再把结果拆开分给参与者。每方只留一个结果片段，可以避免人人长期保存完整归约内容，常用于分片梯度。</p>
-<h3 id="alltoall">AllToAll<a class="anchor" href="#alltoall" aria-label="链接到本节">#</a></h3>
+<h3 id="10-collectives--alltoall">AllToAll<a class="anchor" href="#10-collectives--alltoall" aria-label="链接到本节">#</a></h3>
 <p>每个源为不同目标准备不同片段，交换后各目标收到来自多个源的数据。MoE token 路由可使用这类关系。输入输出大小和分布规则需要各方匹配，数据偏斜也会影响耗时。</p>
-<h3 id="用两个-rank-区分归约与收集">用两个 rank 区分归约与收集<a class="anchor" href="#用两个-rank-区分归约与收集" aria-label="链接到本节">#</a></h3>
+<h3 id="10-collectives--用两个-rank-区分归约与收集">用两个 rank 区分归约与收集<a class="anchor" href="#10-collectives--用两个-rank-区分归约与收集" aria-label="链接到本节">#</a></h3>
 <p>rank 0 输入 <code>[2,7]</code>，rank 1 输入 <code>[5,1]</code>。sum AllReduce 让双方都得到 <code>[7,8]</code>；AllGather 则得到按 rank 顺序排列的 <code>[2,7,5,1]</code>。</p>
 <p>同样的输入做两等份 ReduceScatter，可使 rank 0 留下 <code>[7]</code>、rank 1 留下 <code>[8]</code>。若按一元素一目标做 AllToAll，rank 0 收到 <code>[2,5]</code>，rank 1 收到 <code>[7,1]</code>。这四种结果足以检查你是否把“收集”和“归约”混用。</p>
-<h2 id="ring-的直觉">Ring 的直觉<a class="anchor" href="#ring-的直觉" aria-label="链接到本节">#</a></h2>
+<h2 id="10-collectives--ring-的直觉">Ring 的直觉<a class="anchor" href="#10-collectives--ring-的直觉" aria-label="链接到本节">#</a></h2>
 <p>一种 AllReduce 实现先通过多轮交换完成分片归约，再分发已归约片段。环中各参与者主要与邻居传输，适合利用链路带宽，但启动轮数会随参与者数量增长。</p>
 <p>具体算法还可能采用树或其他结构。消息尺寸、拓扑和协议共同影响选择，应用通常声明数据语义，不应把某次内部使用 ring 当成永久 API 合同。</p>
-<h2 id="拓扑比-gpu-数量更重要">拓扑比 GPU 数量更重要<a class="anchor" href="#拓扑比-gpu-数量更重要" aria-label="链接到本节">#</a></h2>
+<h2 id="10-collectives--拓扑比-gpu-数量更重要">拓扑比 GPU 数量更重要<a class="anchor" href="#10-collectives--拓扑比-gpu-数量更重要" aria-label="链接到本节">#</a></h2>
 <p>四个参与者可能位于同一高速交换域，也可能跨两个普通以太网节点。逻辑操作相同，必要传输路径却不同。先用 <code>nvidia-smi topo -m</code> 等工具确认 GPU、CPU 和 NIC 的邻近关系，再结合通信日志核对实际接口。</p>
 <p>尤其要区分空闲独占测试和共享网络下的训练。链路标称速度不等于该作业可用吞吐，NUMA 和网卡亲和也会引入额外路径。</p>
-<h2 id="同步等待">同步等待<a class="anchor" href="#同步等待" aria-label="链接到本节">#</a></h2>
+<h2 id="10-collectives--同步等待">同步等待<a class="anchor" href="#10-collectives--同步等待" aria-label="链接到本节">#</a></h2>
 <p>参与者必须以兼容的顺序调用操作，并满足对应形状、精度和计数规则。某个 rank 在到达通信前读数据很慢，其他 rank 的等待会出现在 collective 区间，但根因可能不在通信库。</p>
 <p>排查时按运行 ID 对齐各 rank 的时间线，查最早异常与首次顺序分歧。接口选择和权限也是条件，但不应跳过应用侧的一致性检查。</p>
-<h3 id="所有进程都活着-collective-也可能永远等不到">所有进程都活着，collective 也可能永远等不到<a class="anchor" href="#所有进程都活着-collective-也可能永远等不到" aria-label="链接到本节">#</a></h3>
+<h3 id="10-collectives--所有进程都活着-collective-也可能永远等不到">所有进程都活着，collective 也可能永远等不到<a class="anchor" href="#10-collectives--所有进程都活着-collective-也可能永远等不到" aria-label="链接到本节">#</a></h3>
 <p>若 rank 0 等待梯度 AllReduce，rank 1 却因分支进入下一次参数 AllGather，两个进程都存在也不能匹配完成。另一个常见轨迹是某 rank 先 OOM，其他参与者稍后才报告通信超时。</p>
 <p>恢复日志应保留首错与后续连锁错误的顺序。把最后一条 timeout 当作首因，可能导致反复调整网络却从未修复内存或控制流问题。</p>
-<h2 id="通信量如何影响并行选择">通信量如何影响并行选择<a class="anchor" href="#通信量如何影响并行选择" aria-label="链接到本节">#</a></h2>
+<h2 id="10-collectives--通信量如何影响并行选择">通信量如何影响并行选择<a class="anchor" href="#10-collectives--通信量如何影响并行选择" aria-label="链接到本节">#</a></h2>
 <p>层内 TP 通信频繁，PP 在 stage 边界交换激活，分片训练会组装参数与归约梯度，EP 还需分发 token。比较方案应列每步调用次数、消息大小、参与组和物理路径。</p>
 <p>同样一 GiB 数据，一次大传输与成千上万次小传输耗时不同；可重叠部分也不同。因此“总通信字节更少”是有用线索，却不足以单独决定最快配置。</p>
-<h2 id="overlap-不是免费">Overlap 不是免费<a class="anchor" href="#overlap-不是免费" aria-label="链接到本节">#</a></h2>
+<h2 id="10-collectives--overlap-不是免费">Overlap 不是免费<a class="anchor" href="#10-collectives--overlap-不是免费" aria-label="链接到本节">#</a></h2>
 <p>通信若能在不相关计算进行时启动，可以缩短关键路径。前提是后续计算暂不需要结果，且两者争用的资源不会抵消收益。通信 kernel 也可能消耗设备执行和内存带宽。</p>
 <p>bucket 细分有助于更早启动，却增加固定开销；bucket 太大又会推迟开始。应比较完整训练步骤的耗时，不能只凭两条 trace 在时间上交叠就宣布加速。</p>
-<h3 id="大带宽为什么救不了大量小消息">大带宽为什么救不了大量小消息<a class="anchor" href="#大带宽为什么救不了大量小消息" aria-label="链接到本节">#</a></h3>
+<h3 id="10-collectives--大带宽为什么救不了大量小消息">大带宽为什么救不了大量小消息<a class="anchor" href="#10-collectives--大带宽为什么救不了大量小消息" aria-label="链接到本节">#</a></h3>
 <p>用教学近似 <code>耗时 = 启动延迟 + 字节 / 吞吐</code>。设固定开销 8 微秒、吞吐 40 GB/s，发送 4 KB 的数据项约 0.1 微秒，固定部分占主导；发送 40 MB 的数据项约 1 毫秒，带宽影响更明显。</p>
 <p>真实 collective 有多轮交换，这里仅展示量级。若将大批内容切成许多极小 bucket，可能把 8 微秒反复支付。调优应同时观察启动次数与关键路径。</p>
-<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<h2 id="10-collectives--源码入口">源码入口<a class="anchor" href="#10-collectives--源码入口" aria-label="链接到本节">#</a></h2>
 <p>从 <code>nccl/src/collectives.cc</code> 看操作入队，再看 <code>nccl/src/enqueue/</code>。拓扑规划在 <code>nccl/src/graph/</code>，传输选择在 <code>nccl/src/transport/</code>，诊断相关代码可查 <code>nccl/src/ras/</code>。需要把模型切分与通信语义连接时，参考 <code>megatron/core/tensor_parallel/mappings.py</code>，先确认参与组与张量布局再深入设备实现。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">11</div><h1>训练循环与训练显存</h1></header><div class="prose"><p>夜间校对任务用人工修订的档案片段训练模型。一次参数更新要经过取样、前向计算、反向求导和优化器更新。把这些动作的边界画清楚，才能区分数据等待、激活峰值和状态占用。</p>
 <p>下面是说明累积顺序的伪代码，不是可直接运行的训练器：</p>
@@ -502,120 +512,140 @@ python3 examples/infra_lab.py check
 按分布式策略完成需要的梯度同步
 检查数值状态，执行一次参数更新
 </code></pre>
-<h2 id="forward">Forward<a class="anchor" href="#forward" aria-label="链接到本节">#</a></h2>
+<h2 id="11-training-loop--forward">Forward<a class="anchor" href="#11-training-loop--forward" aria-label="链接到本节">#</a></h2>
 <p>模型将输入位置转换为预测分布，并根据目标计算 loss。自动微分需要某些中间结果，因此 forward 结束后并非只留下一个 loss 数值。哪些结果保存、哪些可重算，决定后续激活内存。</p>
 <p>样本掩码、padding 和目标移动也影响训练语义。一个更快但读错目标的 forward 不能算性能优化。</p>
-<h2 id="backward">Backward<a class="anchor" href="#backward" aria-label="链接到本节">#</a></h2>
+<h2 id="11-training-loop--backward">Backward<a class="anchor" href="#11-training-loop--backward" aria-label="链接到本节">#</a></h2>
 <p>自动微分沿依赖关系计算梯度，读取保存结果或重新计算部分区域。分布式方案还可能在梯度就绪后逐批启动同步，而非等全部反向结束才开始通信。</p>
 <p>观察到反向阶段很长时，要区分本地求导、重计算和同步等待。不同原因对应不同动作，不能全部归到“反向约为前向两倍”的粗略经验。</p>
-<h2 id="optimizer-step">Optimizer Step<a class="anchor" href="#optimizer-step" aria-label="链接到本节">#</a></h2>
+<h2 id="11-training-loop--optimizer-step">Optimizer Step<a class="anchor" href="#11-training-loop--optimizer-step" aria-label="链接到本节">#</a></h2>
 <p>以 AdamW 为例，更新需要参数、梯度及 moment，还可能有高精度主参数。更新边界通常也推动学习率计划和步数计数。若数值异常导致跳过更新，要明确这些计数怎样处理。</p>
 <p>只保存模型权重可以用于某些推理场景，却不足以在同一优化状态继续训练。恢复需要的内容将在数据与检查点章节展开。</p>
-<h2 id="micro-batch-global-batch-与累积">Micro-batch、Global batch 与累积<a class="anchor" href="#micro-batch-global-batch-与累积" aria-label="链接到本节">#</a></h2>
+<h2 id="11-training-loop--micro-batch-global-batch-与累积">Micro-batch、Global batch 与累积<a class="anchor" href="#11-training-loop--micro-batch-global-batch-与累积" aria-label="链接到本节">#</a></h2>
 <p>简单同步数据并行下，一次更新的样本数等于每数据副本的 micro-batch 乘数据并行度，再乘累积次数。TP 或 PP 参与者共同处理同一份模型工作，不应再次乘入独立样本数。</p>
 <p>累积允许每次前向使用较小输入，从而减少单次激活峰值。梯度要跨 micro-step 保留，loss 缩放和同步时机也要匹配，否则可能改变有效更新。</p>
-<h3 id="一次-optimizer-step-究竟看过多少样本">一次 optimizer step 究竟看过多少样本<a class="anchor" href="#一次-optimizer-step-究竟看过多少样本" aria-label="链接到本节">#</a></h3>
+<h3 id="11-training-loop--一次-optimizer-step-究竟看过多少样本">一次 optimizer step 究竟看过多少样本<a class="anchor" href="#11-training-loop--一次-optimizer-step-究竟看过多少样本" aria-label="链接到本节">#</a></h3>
 <p>设每个数据副本一次处理 3 份校对样本，共 4 个副本，累积 5 次，则更新前共处理 60 份样本。若每份恰好含 1024 个有效位置，对应 61,440 个有效 token。</p>
 <p>每个 micro-step 都清梯度并更新，会变成五次不同更新，不再等价于这个 global batch。实际变长数据还应按有效 token 而非固定样本长度复核。</p>
-<h2 id="训练显存四大项">训练显存四大项<a class="anchor" href="#训练显存四大项" aria-label="链接到本节">#</a></h2>
+<figure class="diagram" tabindex="0" data-review-figure="infra-accumulation">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 396" role="img" aria-labelledby="11-training-loop--infra-accumulation-title 11-training-loop--infra-accumulation-desc" style="display:block;width:100%;min-width:620px;height:auto">
+<title id="11-training-loop--infra-accumulation-title">5 次累积，只做 1 次参数更新</title>
+<desc id="11-training-loop--infra-accumulation-desc">每个 micro-step：每数据副本 3 个样本 × 4 副本 = 12；累积 5 次：12 × 5 = 60 个样本，梯度持续保留；一次 optimizer step：固定 1024 有效位置时共 61,440 token。示例为简单同步数据并行；TP、PP 不再乘入独立样本数。</desc>
+<rect width="960" height="396" fill="var(--paper,#faf8f1)"/>
+<g font-family="'IBM Plex Sans','Noto Sans CJK SC',system-ui,sans-serif"><text x="40" y="48" font-size="28" fill="var(--ink,#243b48)" text-anchor="start">5 次累积，只做 1 次参数更新</text><path d="M176 144 L176 164" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 157 L176 164 L181 157" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="88" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">每个 micro-step</text><text x="344" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">每数据副本 3 个样本 × 4 副本 = 12</text><path d="M176 224 L176 244" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 237 L176 244 L181 237" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="168" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">累积 5 次</text><text x="344" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">12 × 5 = 60 个样本，梯度持续保留</text><rect x="40" y="248" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#e5ede9))" stroke="var(--forest,var(--accent,#29564c))"/><text x="56" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">一次 optimizer step</text><text x="344" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">固定 1024 有效位置时共 61,440 token</text><path d="M40 332H920" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="40" y="368" font-size="18" fill="var(--muted,#536772)" text-anchor="start">示例为简单同步数据并行；TP、PP 不再乘入独立样本数。</text></g>
+</svg>
+<figcaption>图：示例为简单同步数据并行；TP、PP 不再乘入独立样本数。</figcaption>
+</figure>
+
+<h2 id="11-training-loop--训练显存四大项">训练显存四大项<a class="anchor" href="#11-training-loop--训练显存四大项" aria-label="链接到本节">#</a></h2>
 <p>参数决定模型当前值，梯度记录本轮更新方向，优化器状态记录更新历史，激活支持本轮求导。前几项大体跟参数量相关，激活更直接依赖 micro-batch、序列形状及实现。</p>
 <p>长期状态主导时考虑分片，激活主导时考虑缩小输入或重算。最好通过测量和对象清点确认主项，而不是根据模型标签预判。</p>
-<h2 id="activation-checkpointing">Activation Checkpointing<a class="anchor" href="#activation-checkpointing" aria-label="链接到本节">#</a></h2>
+<h2 id="11-training-loop--activation-checkpointing">Activation Checkpointing<a class="anchor" href="#11-training-loop--activation-checkpointing" aria-label="链接到本节">#</a></h2>
 <p>选择边界保存少量结果，其余中间状态在反向需要时重新计算。它以额外运算换取更小保存集合，边界和分组粒度决定收益及成本。</p>
 <p>采用后需比较峰值与完整 step 时间，还要确认随机性和数值路径按框架要求处理。某些区域计算昂贵却节省有限，不适合一概开启最大力度重算。</p>
-<h3 id="重计算省下的是激活-而不是所有训练状态">重计算省下的是激活，而不是所有训练状态<a class="anchor" href="#重计算省下的是激活-而不是所有训练状态" aria-label="链接到本节">#</a></h3>
+<h3 id="11-training-loop--重计算省下的是激活-而不是所有训练状态">重计算省下的是激活，而不是所有训练状态<a class="anchor" href="#11-training-loop--重计算省下的是激活-而不是所有训练状态" aria-label="链接到本节">#</a></h3>
 <p>若本轮激活峰值为 8 GiB，而参数、梯度和优化器状态共 40 GiB，即使去掉大部分激活，40 GiB 仍然存在。这个教学账解释了为什么重算不能修复所有训练 OOM。</p>
 <p>应优先分析占用大、重新生成成本相对低的中间结果。重算区域扩大后，还需复查数据供给和通信重叠是否改变了关键路径。</p>
-<h2 id="mixed-precision">Mixed Precision<a class="anchor" href="#mixed-precision" aria-label="链接到本节">#</a></h2>
+<h2 id="11-training-loop--mixed-precision">Mixed Precision<a class="anchor" href="#11-training-loop--mixed-precision" aria-label="链接到本节">#</a></h2>
 <p>计算、累加、梯度和优化器可以采用不同精度。FP16 可能需要 loss scaling，BF16 具有不同指数范围和尾数精度，FP8 又依赖硬件及缩放方案。没有一条“全部转低精度”的规则适用于所有训练。</p>
 <p>记录溢出、跳步、梯度范数和 loss，检查速度变化是否伴随训练不稳定。字节数下降只是其中一项结果。</p>
-<h2 id="torchtitan-的训练骨架">TorchTitan 的训练骨架<a class="anchor" href="#torchtitan-的训练骨架" aria-label="链接到本节">#</a></h2>
+<h2 id="11-training-loop--torchtitan-的训练骨架">TorchTitan 的训练骨架<a class="anchor" href="#11-training-loop--torchtitan-的训练骨架" aria-label="链接到本节">#</a></h2>
 <p>先从 <code>train.py</code> 及训练引擎追一步运行，再按职责进入 <code>components/data</code>、优化器组件、<code>distributed</code>、<code>components/checkpointer</code> 和可观测相关模块。目录组织属于版本事实，具体调用应以本地快照为准。</p>
 <p>用一张步骤表记录何时取数、何时同步、何时更新及保存，比按目录逐文件通读更容易保留整体执行关系。</p>
-<h3 id="step-变快-还要确认每步工作没有变少">step 变快，还要确认每步工作没有变少<a class="anchor" href="#step-变快-还要确认每步工作没有变少" aria-label="链接到本节">#</a></h3>
+<h3 id="11-training-loop--step-变快-还要确认每步工作没有变少">step 变快，还要确认每步工作没有变少<a class="anchor" href="#11-training-loop--step-变快-还要确认每步工作没有变少" aria-label="链接到本节">#</a></h3>
 <p>把有效长度从 2048 减到 1024 会让步骤变短，但也可能把处理量减半。比较时保留 global batch、有效 token 数与训练目标，报告 tokens/s 和质量曲线，而不是仅展示 step 毫秒数。</p>
 <p>保存间隔变化也会影响平均吞吐。只截取两次 checkpoint 之间最平稳的区间，不能代表完整作业成本。</p>
-<h2 id="训练吞吐看什么">训练吞吐看什么<a class="anchor" href="#训练吞吐看什么" aria-label="链接到本节">#</a></h2>
+<h2 id="11-training-loop--训练吞吐看什么">训练吞吐看什么<a class="anchor" href="#11-training-loop--训练吞吐看什么" aria-label="链接到本节">#</a></h2>
 <p>一起记录有效 token 或样本速率、step 分解、各 rank 的尾部耗时、保存暂停和数值健康。若报告 MFU，说明运算量估算口径。吞吐数字必须能解释实际处理量，并能覆盖失败、保存和恢复的正常运维成本。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">12</div><h1>分片、重计算与并行组合</h1></header><div class="prose"><p>档案模型训练需要的状态超过单卡容量时，要先确定是长期训练状态还是本轮激活过大。不同切分方案降低不同项，并会改变数据交换与恢复方式。</p>
-<h2 id="从复制到完全分片">从复制到完全分片<a class="anchor" href="#从复制到完全分片" aria-label="链接到本节">#</a></h2>
+<h2 id="12-distributed-training--从复制到完全分片">从复制到完全分片<a class="anchor" href="#12-distributed-training--从复制到完全分片" aria-label="链接到本节">#</a></h2>
 <p>普通数据并行让每个副本保存完整训练状态。将优化器、梯度乃至参数拆给多个 rank，可以减少每个参与者长期保留的内容，但使用时可能需要重新组装。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 465" role="img" aria-label="常驻变少，不代表执行峰值等比例缩小"><title>常驻变少，不代表执行峰值等比例缩小</title><rect width="960" height="465" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">常驻变少，不代表执行峰值等比例缩小</text><text x="30" y="90" font-size="20" fill="#202b32" text-anchor="start">长期状态：按 rank 分片驻留</text><text x="42" y="130" font-size="18" fill="#245d79" text-anchor="start">rank 0</text><rect x="30" y="145" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="44" y="174" font-size="19" fill="#202b32" text-anchor="start">参数片段</text><rect x="30" y="202" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="44" y="231" font-size="19" fill="#202b32" text-anchor="start">梯度片段</text><rect x="30" y="259" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="44" y="288" font-size="19" fill="#202b32" text-anchor="start">更新历史</text><text x="162" y="130" font-size="18" fill="#245d79" text-anchor="start">rank 1</text><rect x="150" y="145" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="164" y="174" font-size="19" fill="#202b32" text-anchor="start">参数片段</text><rect x="150" y="202" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="164" y="231" font-size="19" fill="#202b32" text-anchor="start">梯度片段</text><rect x="150" y="259" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="164" y="288" font-size="19" fill="#202b32" text-anchor="start">更新历史</text><text x="282" y="130" font-size="18" fill="#245d79" text-anchor="start">rank 2</text><rect x="270" y="145" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="284" y="174" font-size="19" fill="#202b32" text-anchor="start">参数片段</text><rect x="270" y="202" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="284" y="231" font-size="19" fill="#202b32" text-anchor="start">梯度片段</text><rect x="270" y="259" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="284" y="288" font-size="19" fill="#202b32" text-anchor="start">更新历史</text><text x="402" y="130" font-size="18" fill="#245d79" text-anchor="start">rank 3</text><rect x="390" y="145" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="404" y="174" font-size="19" fill="#202b32" text-anchor="start">参数片段</text><rect x="390" y="202" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="404" y="231" font-size="19" fill="#202b32" text-anchor="start">梯度片段</text><rect x="390" y="259" width="105" height="45" fill="#e7eef0" stroke="#bfc8cc"/><text x="404" y="288" font-size="19" fill="#202b32" text-anchor="start">更新历史</text><path d="M525 85 L525 380" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="555" y="90" font-size="20" fill="#202b32" text-anchor="start">一次 unit 的生命周期</text><rect x="580" y="112" width="320" height="59" fill="#e7eef0" stroke="#bfc8cc"/><text x="594" y="141" font-size="19" fill="#202b32" text-anchor="start">收集参数</text><text x="594" y="167" font-size="15" fill="#56616b" text-anchor="start">AllGather</text><path d="M740 171 L740 181" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="740.0,181.0 736.1,171.8 743.9,171.8" fill="#245d79"/><rect x="580" y="181" width="320" height="59" fill="#e7eef0" stroke="#bfc8cc"/><text x="594" y="210" font-size="19" fill="#202b32" text-anchor="start">执行计算</text><text x="594" y="236" font-size="15" fill="#56616b" text-anchor="start">当前 unit</text><path d="M740 240 L740 250" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="740.0,250.0 736.1,240.8 743.9,240.8" fill="#245d79"/><rect x="580" y="250" width="320" height="59" fill="#e7eef0" stroke="#bfc8cc"/><text x="594" y="279" font-size="19" fill="#202b32" text-anchor="start">归约梯度</text><text x="594" y="305" font-size="15" fill="#56616b" text-anchor="start">ReduceScatter</text><path d="M740 309 L740 319" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="740.0,319.0 736.1,309.8 743.9,309.8" fill="#245d79"/><rect x="580" y="319" width="320" height="59" fill="#e7eef0" stroke="#bfc8cc"/><text x="594" y="348" font-size="19" fill="#202b32" text-anchor="start">保留分片</text><text x="594" y="374" font-size="15" fill="#56616b" text-anchor="start">准备下一个 unit</text><text x="30" y="425" font-size="18" fill="#56616b" text-anchor="start">分片降低常驻量；收集、预取和临时 buffer 仍可能形成峰值。</text></g></svg>
 <figcaption>图：四列 rank 共享三类训练状态；旁边展开一次 unit 的组装、计算、梯度归约与重新分片。</figcaption></figure>
 
-<h3 id="zero-的教学分级">ZeRO 的教学分级<a class="anchor" href="#zero-的教学分级" aria-label="链接到本节">#</a></h3>
+<h3 id="12-distributed-training--zero-的教学分级">ZeRO 的教学分级<a class="anchor" href="#12-distributed-training--zero-的教学分级" aria-label="链接到本节">#</a></h3>
 <p>Stage 1 从优化器状态分片开始，Stage 2 再划分梯度，Stage 3 进一步划分参数。这个递进用于理解省下什么、使用时补回什么，不意味着所有现代接口都直接以 stage 命名。</p>
 <p>完整方案还涉及何时通信、哪些状态保持高精度以及怎样保存。不能只从级别编号推断所有实现细节。</p>
-<h2 id="fsdp2-的直觉">FSDP2 的直觉<a class="anchor" href="#fsdp2-的直觉" aria-label="链接到本节">#</a></h2>
+<h2 id="12-distributed-training--fsdp2-的直觉">FSDP2 的直觉<a class="anchor" href="#12-distributed-training--fsdp2-的直觉" aria-label="链接到本节">#</a></h2>
 <p>参数以 shard 驻留，需要执行某个 unit 时收集相应内容，完成后按策略重新分片。反向也有参数需求，并将梯度归约成分片形式。预取可以把部分通信提前，但会延长更多 buffer 同时存活的时间。</p>
 <p>unit 粒度是关键取舍：小 unit 缩小一次组装，却增加操作次数；大 unit 减少管理，却可能抬高峰值。应把显存与通信时间放到同一张实验表里。</p>
-<h3 id="分片后的常驻显存与计算峰值不同">分片后的常驻显存与计算峰值不同<a class="anchor" href="#分片后的常驻显存与计算峰值不同" aria-label="链接到本节">#</a></h3>
+<h3 id="12-distributed-training--分片后的常驻显存与计算峰值不同">分片后的常驻显存与计算峰值不同<a class="anchor" href="#12-distributed-training--分片后的常驻显存与计算峰值不同" aria-label="链接到本节">#</a></h3>
 <p>设总参数内容 12 GiB，四个 rank 理想各持 3 GiB。若本次需要额外组装一个 2 GiB unit，按“shard 与组装 buffer 同时存在”的教学假设，瞬时至少涉及 5 GiB 参数相关空间；预取下一 unit 可能再增加占用。</p>
 <p>实际实现可能复用或释放部分空间，这个数字不是 FSDP 的固定保证。重要的是画出生命周期，不能仅把 12 除以 4 当作设备峰值。</p>
-<h2 id="3d-并行">3D 并行<a class="anchor" href="#3d-并行" aria-label="链接到本节">#</a></h2>
+<h2 id="12-distributed-training--3d-并行">3D 并行<a class="anchor" href="#12-distributed-training--3d-并行" aria-label="链接到本节">#</a></h2>
 <p>DP 或 FSDP 处理样本与训练状态，TP 切层内工作，PP 切层序列。组合时，每个 rank 同时属于多种组，但每次通信只在对应组内进行。</p>
 <p>给 rank 写出 <code>(dp, pp, tp)</code> 坐标，再为每个维度列成员，能检查是否有错误交叉。长序列和 MoE 增加的维度要遵循框架分组约束，不能只做卡数乘法。</p>
-<h2 id="为什么节点内优先-tp">为什么节点内优先 TP<a class="anchor" href="#为什么节点内优先-tp" aria-label="链接到本节">#</a></h2>
+<h2 id="12-distributed-training--为什么节点内优先-tp">为什么节点内优先 TP<a class="anchor" href="#12-distributed-training--为什么节点内优先-tp" aria-label="链接到本节">#</a></h2>
 <p>TP 经常在层内交换，频率较高，通常更依赖低延迟高速链路。让这种组留在同一快互联域，再把其他维度跨节点扩展，是常见起点，但仍需结合矩阵大小与设备拓扑测试。</p>
 <p>调度器若只满足张数而把必要参与者放到慢链路两端，程序可能正确运行却明显变慢。作业提交应表达拓扑需求，而非仅依靠 rank 编号。</p>
-<h2 id="pipeline-bubble">Pipeline Bubble<a class="anchor" href="#pipeline-bubble" aria-label="链接到本节">#</a></h2>
+<h2 id="12-distributed-training--pipeline-bubble">Pipeline Bubble<a class="anchor" href="#12-distributed-training--pipeline-bubble" aria-label="链接到本节">#</a></h2>
 <p>stage 只能在前置激活可用后执行。多个 micro-batch 可以交错前进，起步与收尾仍有空闲；计算最慢的 stage 还会决定持续节拍。</p>
 <p>优化时检查实际 stage 时间、跨界传输和调度策略。层数均分不等于耗时均分，输出头或特殊层可能使某一 stage 成为瓶颈。</p>
-<h3 id="流水线空泡不是-gpu-没有被分到任务">流水线空泡不是 GPU 没有被分到任务<a class="anchor" href="#流水线空泡不是-gpu-没有被分到任务" aria-label="链接到本节">#</a></h3>
+<h3 id="12-distributed-training--流水线空泡不是-gpu-没有被分到任务">流水线空泡不是 GPU 没有被分到任务<a class="anchor" href="#12-distributed-training--流水线空泡不是-gpu-没有被分到任务" aria-label="链接到本节">#</a></h3>
 <p>仅考虑三个等时 stage 的前向流水线，六个 micro-batch 需要八段时间才能全部通过。每个 stage 忙六段，理想忙碌比例为 75%。卡已经分配成功，空泡来自依赖。</p>
 <p>真实训练还包括反向、调度和通信，这个比例不能直接预测。它仅说明增加 micro-batch 可摊薄起止成本，也说明应观察执行泳道而非只看资源占有。</p>
-<h2 id="cpu-offload-的真实代价">CPU Offload 的真实代价<a class="anchor" href="#cpu-offload-的真实代价" aria-label="链接到本节">#</a></h2>
+<h2 id="12-distributed-training--cpu-offload-的真实代价">CPU Offload 的真实代价<a class="anchor" href="#12-distributed-training--cpu-offload-的真实代价" aria-label="链接到本节">#</a></h2>
 <p>把某些状态放到主机可以减小设备常驻空间，但数据要经过主机内存和 PCIe 等路径。若所需状态未能及时搬回，设备会停等；NUMA、固定页内存和同时进行的数据加载也会影响结果。</p>
 <p>因此 offload 是转移容量需求的方案。实验必须同时记录设备节省、CPU 占用、传输量和步骤延迟，不能把 CPU 当作无成本的显存延伸。</p>
-<h2 id="选型顺序">选型顺序<a class="anchor" href="#选型顺序" aria-label="链接到本节">#</a></h2>
+<h2 id="12-distributed-training--选型顺序">选型顺序<a class="anchor" href="#12-distributed-training--选型顺序" aria-label="链接到本节">#</a></h2>
 <p>依据占用主项选择最少复杂度的候选：激活峰值先尝试合适重算或输入形状调整，长期状态考虑分片，单层难以容纳时研究 TP，层序列扩展时研究 PP。CP 与 EP 则需要对应的长序列或专家结构需求。</p>
 <p>这是一条排查路线，不是强制算法。每增加一维，都应保留较简单方案的对照，并证明新增通信与运维成本有实际收益。</p>
-<h3 id="怎样让并行选择成为可解释的实验">怎样让并行选择成为可解释的实验<a class="anchor" href="#怎样让并行选择成为可解释的实验" aria-label="链接到本节">#</a></h3>
+<h3 id="12-distributed-training--怎样让并行选择成为可解释的实验">怎样让并行选择成为可解释的实验<a class="anchor" href="#12-distributed-training--怎样让并行选择成为可解释的实验" aria-label="链接到本节">#</a></h3>
 <p>写下假设，例如“optimizer 状态主导，分片应降低常驻而增加通信”。固定数据和 global batch，测常驻、峰值、通信与有效吞吐。若结果不符，先检查实际启用路径与被遗漏的 buffer。</p>
 <p>同时演练当前 mesh 的 checkpoint 保存和恢复。能完成一次高吞吐运行，却无法在故障后重新放置状态，仍不是可靠训练方案。</p>
-<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<h2 id="12-distributed-training--源码入口">源码入口<a class="anchor" href="#12-distributed-training--源码入口" aria-label="链接到本节">#</a></h2>
 <p>TorchTitan 的并行组织可查 <code>torchtitan/distributed/</code> 和模型对应的 <code>torchtitan/models/*/parallelize.py</code>。Megatron 侧先看 <code>megatron/core/parallel_state.py</code>，再按问题进入 <code>megatron/core/pipeline_parallel/</code> 或 <code>megatron/core/distributed/</code>。阅读顺序应从组成员和数据归属出发，再到具体通信实现。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">13</div><h1>数据管道与 Checkpoint</h1></header><div class="prose"><p>训练需要持续送入正确数据，也需要把可恢复状态交给存储。两条链分别决定设备是否空等，以及失败后会退回哪里。文件写出来和训练能够恢复，是不同的验收标准。</p>
-<h2 id="数据路径">数据路径<a class="anchor" href="#数据路径" aria-label="链接到本节">#</a></h2>
+<h2 id="13-data-checkpoint--数据路径">数据路径<a class="anchor" href="#13-data-checkpoint--数据路径" aria-label="链接到本节">#</a></h2>
 <p>校对文本从远端分片进入读取 worker，经过解码、分词或 packing，在主机内存形成 batch，再传到设备。任何一段供给不足都可能让后面停顿。</p>
 <p>可分别测远端读取、worker 处理、就绪队列和主机到设备拷贝。若就绪队列长期为空而设备有空隙，应先检查供给；如果队列充足却传输迟缓，再看内存、拷贝与依赖。</p>
-<h2 id="sharding-与顺序">Sharding 与顺序<a class="anchor" href="#sharding-与顺序" aria-label="链接到本节">#</a></h2>
+<h2 id="13-data-checkpoint--sharding-与顺序">Sharding 与顺序<a class="anchor" href="#13-data-checkpoint--sharding-与顺序" aria-label="链接到本节">#</a></h2>
 <p>数据并行副本需要有明确的样本分配，避免无意重复或遗漏。shuffle 种子、epoch、分片清单和 packing 规则共同决定数据顺序，worker 数变化也可能改变读取方式。</p>
 <p>这些配置应与数据版本一起保存。吞吐比较中若同时改变 packing，样本数相同也不一定代表有效 token 数相同。</p>
-<h3 id="从同一-step-恢复-为什么还可能读到不同数据">从同一 step 恢复，为什么还可能读到不同数据<a class="anchor" href="#从同一-step-恢复-为什么还可能读到不同数据" aria-label="链接到本节">#</a></h3>
+<h3 id="13-data-checkpoint--从同一-step-恢复-为什么还可能读到不同数据">从同一 step 恢复，为什么还可能读到不同数据<a class="anchor" href="#13-data-checkpoint--从同一-step-恢复-为什么还可能读到不同数据" aria-label="链接到本节">#</a></h3>
 <p>第 420 次更新结束，不足以说明第几个分片的哪个位置被消费。若模型恢复到这里，而 sampler 回到开头，程序可以继续运行，却会重新读取旧样本。</p>
 <p>恢复合同要说明数据游标、随机状态和已预取数据怎样处理。对于无法做到严格等价的流式数据，明确允许重复或跳过的范围，而不是用“已 resume”掩盖差异。</p>
-<h2 id="checkpoint-保存什么">Checkpoint 保存什么<a class="anchor" href="#checkpoint-保存什么" aria-label="链接到本节">#</a></h2>
+<h2 id="13-data-checkpoint--checkpoint-保存什么">Checkpoint 保存什么<a class="anchor" href="#13-data-checkpoint--checkpoint-保存什么" aria-label="链接到本节">#</a></h2>
 <p>可继续训练的状态通常包含参数、优化器、步数和学习率计划，还要考虑 RNG、数值缩放、数据位置以及模型与并行配置。代码和数据版本引用用于解释这份状态属于哪种运行。</p>
 <p>参数文件只够回答“模型现在是什么值”，不足以回答“下一次应读什么、怎样更新”。保存前按恢复目标列清单，避免到事故后才发现缺了关键状态。</p>
-<h2 id="分布式-checkpoint">分布式 Checkpoint<a class="anchor" href="#分布式-checkpoint" aria-label="链接到本节">#</a></h2>
+<h2 id="13-data-checkpoint--分布式-checkpoint">分布式 Checkpoint<a class="anchor" href="#13-data-checkpoint--分布式-checkpoint" aria-label="链接到本节">#</a></h2>
 <p>让单个 rank 汇总全部状态，可能造成巨大的内存峰值和写入瓶颈。分布式保存由多个参与者写各自分片，metadata 描述全局 tensor 与片段位置。</p>
 <p>若计划改变 world size 恢复，格式和恢复器必须支持重新切分。长期格式不能只留下“rank 3 的文件”而失去全局形状和归属含义。</p>
-<h2 id="一致性与原子提交">一致性与原子提交<a class="anchor" href="#一致性与原子提交" aria-label="链接到本节">#</a></h2>
+<h2 id="13-data-checkpoint--一致性与原子提交">一致性与原子提交<a class="anchor" href="#13-data-checkpoint--一致性与原子提交" aria-label="链接到本节">#</a></h2>
 <p>一次保存可先写临时对象，再确认分片与元数据满足完整性条件，最后发布提交记录。读取方只选择已经提交的版本，<code>latest</code> 也应指向可用版本。</p>
 <p>底层存储的重命名和一致性语义不同，不能假设对象存储具有本地文件系统一样的原子操作。协议必须按实际存储能力实现。</p>
-<h3 id="完成标记为什么要最后写">完成标记为什么要最后写<a class="anchor" href="#完成标记为什么要最后写" aria-label="链接到本节">#</a></h3>
+<h3 id="13-data-checkpoint--完成标记为什么要最后写">完成标记为什么要最后写<a class="anchor" href="#13-data-checkpoint--完成标记为什么要最后写" aria-label="链接到本节">#</a></h3>
 <p>假设八个分片只完成七个，目录和多数文件都已出现。若恢复器凭目录名选最新，就会读到不完整状态。提交记录要在完整性验证后才可见，失败尝试不应覆盖已知可用的指针。</p>
 <p>校验还要覆盖预期对象集合、尺寸或校验值，以及 metadata 是否匹配。仅检查“存在八个文件”无法排除写错内容或混入旧分片。</p>
-<h2 id="同步与异步保存">同步与异步保存<a class="anchor" href="#同步与异步保存" aria-label="链接到本节">#</a></h2>
+<figure class="diagram" tabindex="0" data-review-figure="infra-checkpoint-commit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 476" role="img" aria-labelledby="13-data-checkpoint--infra-checkpoint-commit-title 13-data-checkpoint--infra-checkpoint-commit-desc" style="display:block;width:100%;min-width:620px;height:auto">
+<title id="13-data-checkpoint--infra-checkpoint-commit-title">分片出现，不等于检查点已提交</title>
+<desc id="13-data-checkpoint--infra-checkpoint-commit-desc">写临时对象：8 个预期分片及其 metadata；检查完整性：只完成 7 个时，不发布新版本；发布提交记录：完整集合、尺寸或校验值全部通过；恢复只选已提交版本：新尝试失败时仍可回到旧可用点。流程为协议示意；具体原子性取决于目标存储。</desc>
+<rect width="960" height="476" fill="var(--paper,#faf8f1)"/>
+<g font-family="'IBM Plex Sans','Noto Sans CJK SC',system-ui,sans-serif"><text x="40" y="48" font-size="28" fill="var(--ink,#243b48)" text-anchor="start">分片出现，不等于检查点已提交</text><path d="M176 144 L176 164" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 157 L176 164 L181 157" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="88" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">写临时对象</text><text x="344" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">8 个预期分片及其 metadata</text><path d="M176 224 L176 244" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 237 L176 244 L181 237" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="168" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">检查完整性</text><text x="344" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">只完成 7 个时，不发布新版本</text><path d="M176 304 L176 324" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 317 L176 324 L181 317" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="248" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">发布提交记录</text><text x="344" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">完整集合、尺寸或校验值全部通过</text><rect x="40" y="328" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#e5ede9))" stroke="var(--forest,var(--accent,#29564c))"/><text x="56" y="363" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">恢复只选已提交版本</text><text x="344" y="363" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">新尝试失败时仍可回到旧可用点</text><path d="M40 412H920" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="40" y="448" font-size="18" fill="var(--muted,#536772)" text-anchor="start">流程为协议示意；具体原子性取决于目标存储。</text></g>
+</svg>
+<figcaption>图：流程为协议示意；具体原子性取决于目标存储。</figcaption>
+</figure>
+
+<h2 id="13-data-checkpoint--同步与异步保存">同步与异步保存<a class="anchor" href="#13-data-checkpoint--同步与异步保存" aria-label="链接到本节">#</a></h2>
 <p>同步方案在保存完成前暂停训练，边界清晰但会产生停顿。异步方案先形成稳定快照并完成必要 staging，再由后台写出，缩短设备等待。</p>
 <p>如果后台直接读取继续变化的参数，得到的可能不是任一真实步骤的状态。稳定快照需要额外内存、拷贝和并发控制，多个保存任务堆积时也必须有背压。</p>
-<h2 id="保存频率怎么算">保存频率怎么算<a class="anchor" href="#保存频率怎么算" aria-label="链接到本节">#</a></h2>
+<h2 id="13-data-checkpoint--保存频率怎么算">保存频率怎么算<a class="anchor" href="#13-data-checkpoint--保存频率怎么算" aria-label="链接到本节">#</a></h2>
 <p>若故障在两个保存点之间近似均匀发生，单次失败平均丢失工作约为间隔的一半。间隔变短能减少回退，却提高正常保存开销；真实决策还要加入故障率、恢复时间与任务价值。</p>
 <p>可以先测一次保存暂停和写出持续时间，再为候选间隔估计正常成本与失败损失，最后用演练修正假设。不能只复制别处的 cron 周期。</p>
-<h2 id="推理也需要持久化吗">推理也需要持久化吗<a class="anchor" href="#推理也需要持久化吗" aria-label="链接到本节">#</a></h2>
+<h2 id="13-data-checkpoint--推理也需要持久化吗">推理也需要持久化吗<a class="anchor" href="#13-data-checkpoint--推理也需要持久化吗" aria-label="链接到本节">#</a></h2>
 <p>在线引擎往往通过重新加载模型恢复服务，不对每条生成维护可搬迁的 GPU 检查点。长时档案处理任务可以在应用层保存输入、已完成单元和业务结果，再在失败后重试未完成部分。</p>
 <p>若要从生成中途精确续写，还涉及历史状态、采样随机性和引擎格式，复杂度明显更高。先确认业务是否确实需要这种语义。</p>
-<h3 id="保存频率在正常开销与失败损失之间取舍">保存频率在正常开销与失败损失之间取舍<a class="anchor" href="#保存频率在正常开销与失败损失之间取舍" aria-label="链接到本节">#</a></h3>
+<h3 id="13-data-checkpoint--保存频率在正常开销与失败损失之间取舍">保存频率在正常开销与失败损失之间取舍<a class="anchor" href="#13-data-checkpoint--保存频率在正常开销与失败损失之间取舍" aria-label="链接到本节">#</a></h3>
 <p>设一次同步暂停 30 秒，间隔 30 分钟，粗略正常暂停比例约 1.67%；改为每 10 分钟保存则约 5%。在均匀失败假设下，单次平均回退从 15 分钟降到 5 分钟。这个教学比较没有加入后台写入和恢复耗时。</p>
 <p>最终应实际加载保存结果，核对步数、下一批数据和优化器状态，并执行几步验证。保存日志的成功消息只能证明某个保存路径返回，不能替代恢复验收。</p>
-<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<h2 id="13-data-checkpoint--源码入口">源码入口<a class="anchor" href="#13-data-checkpoint--源码入口" aria-label="链接到本节">#</a></h2>
 <p>数据与保存可从 <code>torchtitan/components/data/</code>、<code>torchtitan/components/checkpointer/</code> 追起，Megatron 的分布式状态格式在 <code>megatron/core/dist_checkpointing/</code>。结合 PyTorch Distributed Checkpoint 文档，按状态声明、规划、写入和重分片顺序阅读，确认目标版本实际支持的恢复条件。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">14</div><h1>Kubernetes 怎样看到 GPU</h1></header><div class="prose"><p>节点装好了 GPU，并不意味着 Kubernetes 已经能分配它。设备需要被发现、报告为资源，并在容器启动时获得正确访问条件。资源计数与模型真正可运行之间还有多层合同。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 440" role="img" aria-label="资源声明到实际访问：按阶段定位"><title>资源声明到实际访问：按阶段定位</title><rect width="960" height="440" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">资源声明到实际访问：按阶段定位</text><rect x="40" y="105" width="190" height="76" fill="#e7eef0" stroke="#bfc8cc"/><text x="54" y="134" font-size="19" fill="#202b32" text-anchor="start">设备发现</text><text x="54" y="160" font-size="15" fill="#56616b" text-anchor="start">驱动 / 健康</text><rect x="270" y="105" width="190" height="76" fill="#e7eef0" stroke="#bfc8cc"/><text x="284" y="134" font-size="19" fill="#202b32" text-anchor="start">资源报告</text><text x="284" y="160" font-size="15" fill="#56616b" text-anchor="start">插件 → kubelet</text><rect x="500" y="105" width="190" height="76" fill="#e7eef0" stroke="#bfc8cc"/><text x="514" y="134" font-size="19" fill="#202b32" text-anchor="start">节点绑定</text><text x="514" y="160" font-size="15" fill="#56616b" text-anchor="start">scheduler</text><rect x="730" y="105" width="190" height="76" fill="#e7eef0" stroke="#bfc8cc"/><text x="744" y="134" font-size="19" fill="#202b32" text-anchor="start">设备暴露</text><text x="744" y="160" font-size="15" fill="#56616b" text-anchor="start">kubelet / runtime</text><path d="M230 143 L265 143" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="265.0,143.0 255.8,146.9 255.8,139.1" fill="#245d79"/><path d="M460 143 L495 143" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="495.0,143.0 485.8,146.9 485.8,139.1" fill="#245d79"/><path d="M690 143 L725 143" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="725.0,143.0 715.8,146.9 715.8,139.1" fill="#245d79"/><rect x="40" y="255" width="260" height="76" fill="#eee8dd" stroke="#bfc8cc"/><text x="54" y="284" font-size="19" fill="#202b32" text-anchor="start">节点无资源</text><text x="54" y="310" font-size="15" fill="#56616b" text-anchor="start">查注册和健康</text><rect x="350" y="255" width="260" height="76" fill="#eee8dd" stroke="#bfc8cc"/><text x="364" y="284" font-size="19" fill="#202b32" text-anchor="start">Pod Pending</text><text x="364" y="310" font-size="15" fill="#56616b" text-anchor="start">查数量与约束</text><rect x="660" y="255" width="260" height="76" fill="#eee8dd" stroke="#bfc8cc"/><text x="674" y="284" font-size="19" fill="#202b32" text-anchor="start">容器内不可见</text><text x="674" y="310" font-size="15" fill="#56616b" text-anchor="start">查分配与运行时</text><text x="40" y="395" font-size="20" fill="#a14929" text-anchor="start">整数量可分配 ≠ 显存足够 ≠ 多 rank 已就绪。</text></g></svg>
 <figcaption>图：从硬件健康到节点资源，再到 Pod 绑定和容器设备暴露，四个步骤分别有不同负责者。</figcaption></figure>
 
-<h2 id="extended-resource">Extended Resource<a class="anchor" href="#extended-resource" aria-label="链接到本节">#</a></h2>
+<h2 id="14-kubernetes-gpu--extended-resource">Extended Resource<a class="anchor" href="#14-kubernetes-gpu--extended-resource" aria-label="链接到本节">#</a></h2>
 <p>一个档案批处理容器可以声明：</p>
 <pre><code class="language-yaml">apiVersion: v1
 kind: Pod
@@ -631,167 +661,177 @@ spec:
           nvidia.com/gpu: 2
 </code></pre>
 <p>镜像地址为教学示意，不能直接作为可拉取镜像。这里申请的是两个整数量资源，并不意味着默认允许 <code>0.5</code> 张物理卡。共享方案需要另外配置并说明隔离语义。</p>
-<h2 id="device-plugin-的职责">Device Plugin 的职责<a class="anchor" href="#device-plugin-的职责" aria-label="链接到本节">#</a></h2>
+<h2 id="14-kubernetes-gpu--device-plugin-的职责">Device Plugin 的职责<a class="anchor" href="#14-kubernetes-gpu--device-plugin-的职责" aria-label="链接到本节">#</a></h2>
 <p>插件发现设备、跟踪健康状态，向 kubelet 注册资源，并在分配时提供设备可访问所需的信息。实际可通过设备节点、环境、挂载或 CDI 等机制完成，依配置和版本而异。</p>
 <p>插件不替集群选择节点，也不判断模型的 KV 是否足够。它使设备成为可分配对象，应用运行条件仍由其他层共同保证。</p>
-<h2 id="scheduler-知道多少">Scheduler 知道多少<a class="anchor" href="#scheduler-知道多少" aria-label="链接到本节">#</a></h2>
+<h2 id="14-kubernetes-gpu--scheduler-知道多少">Scheduler 知道多少<a class="anchor" href="#14-kubernetes-gpu--scheduler-知道多少" aria-label="链接到本节">#</a></h2>
 <p>调度器能依据节点报告的数量和 Pod 的约束选择放置位置。默认资源名本身通常不包含显存大小、模型热缓存或任意两卡之间的高速互联关系。</p>
 <p>型号和位置需求可借标签、亲和与拓扑机制表达，成组启动还需作业级调度支持。不要把 <code>nvidia.com/gpu: 2</code> 读成“自动给我最适合这个 TP 模型的一对卡”。</p>
-<h3 id="资源数字怎样一步步变成容器可访问的设备">资源数字怎样一步步变成容器可访问的设备<a class="anchor" href="#资源数字怎样一步步变成容器可访问的设备" aria-label="链接到本节">#</a></h3>
+<h3 id="14-kubernetes-gpu--资源数字怎样一步步变成容器可访问的设备">资源数字怎样一步步变成容器可访问的设备<a class="anchor" href="#14-kubernetes-gpu--资源数字怎样一步步变成容器可访问的设备" aria-label="链接到本节">#</a></h3>
 <p>先由节点插件报告设备，再由节点状态呈现可分配数量，调度器绑定 Pod，最后 kubelet 与运行时完成具体设备暴露。每一步都有独立失败方式。</p>
 <p>Pod 尚未绑定时检查调度事件；绑定成功但容器看不到设备时检查 Allocate、运行时和驱动库。跳过阶段区分而反复重启应用，会丢失有价值的现场。</p>
-<h2 id="mig-time-slicing-与-mps">MIG、Time-slicing 与 MPS<a class="anchor" href="#mig-time-slicing-与-mps" aria-label="链接到本节">#</a></h2>
-<h3 id="mig">MIG<a class="anchor" href="#mig" aria-label="链接到本节">#</a></h3>
+<h2 id="14-kubernetes-gpu--mig-time-slicing-与-mps">MIG、Time-slicing 与 MPS<a class="anchor" href="#14-kubernetes-gpu--mig-time-slicing-与-mps" aria-label="链接到本节">#</a></h2>
+<h3 id="14-kubernetes-gpu--mig">MIG<a class="anchor" href="#14-kubernetes-gpu--mig" aria-label="链接到本节">#</a></h3>
 <p>支持的硬件可划出具有特定资源配置的实例。实例规格限制显存和计算份额，也影响能否承载某个模型。硬件分区带来的隔离与运维约束，需要结合设备支持及 profile 规划。</p>
-<h3 id="time-slicing">Time-slicing<a class="anchor" href="#time-slicing" aria-label="链接到本节">#</a></h3>
+<h3 id="14-kubernetes-gpu--time-slicing">Time-slicing<a class="anchor" href="#14-kubernetes-gpu--time-slicing" aria-label="链接到本节">#</a></h3>
 <p>多个逻辑使用者轮流共享设备执行机会。增加可声明份额有利于低负载复用，但通常不构成独立显存容量保证，也不使物理带宽成倍增加。</p>
-<h3 id="mps">MPS<a class="anchor" href="#mps" aria-label="链接到本节">#</a></h3>
+<h3 id="14-kubernetes-gpu--mps">MPS<a class="anchor" href="#14-kubernetes-gpu--mps" aria-label="链接到本节">#</a></h3>
 <p>MPS 协调多个 CUDA 进程共享执行资源，可能改善并发效率。支持条件、限制和错误影响范围与 MIG 不同，需要使用真实应用验证，不能把三者一概称作同一种虚拟卡。</p>
-<h2 id="daemonset-与节点准备">DaemonSet 与节点准备<a class="anchor" href="#daemonset-与节点准备" aria-label="链接到本节">#</a></h2>
+<h2 id="14-kubernetes-gpu--daemonset-与节点准备">DaemonSet 与节点准备<a class="anchor" href="#14-kubernetes-gpu--daemonset-与节点准备" aria-label="链接到本节">#</a></h2>
 <p>插件通常通过 DaemonSet 覆盖 GPU 节点。节点还需要可用驱动、兼容的容器运行时和工具包、正确网络，以及必要监控。自动化 Operator 可以管理其中部分生命周期，但兼容组合仍需验证。</p>
 <p>给节点准备建立版本清单，包含内核、驱动、容器 CUDA 运行库、插件配置和通信组件。升级前用代表性单卡与多卡任务做检查，而不只确认 Pod 正常。</p>
-<h3 id="共享份额不应被当成显存承诺">共享份额不应被当成显存承诺<a class="anchor" href="#共享份额不应被当成显存承诺" aria-label="链接到本节">#</a></h3>
+<h3 id="14-kubernetes-gpu--共享份额不应被当成显存承诺">共享份额不应被当成显存承诺<a class="anchor" href="#14-kubernetes-gpu--共享份额不应被当成显存承诺" aria-label="链接到本节">#</a></h3>
 <p>假设物理卡有 16 GiB，两份任务各需 11 GiB。即使调度层暴露两个共享槽，也没有 22 GiB 物理空间可供它们同时驻留。</p>
 <p>若需要确定的显存边界，必须选择满足条件的隔离方案，并用真实模型峰值验收。共享利用率提升与容量保证是两种不同目标。</p>
-<h2 id="一个-pod-能用多卡-不等于多节点">一个 Pod 能用多卡，不等于多节点<a class="anchor" href="#一个-pod-能用多卡-不等于多节点" aria-label="链接到本节">#</a></h2>
+<h2 id="14-kubernetes-gpu--一个-pod-能用多卡-不等于多节点">一个 Pod 能用多卡，不等于多节点<a class="anchor" href="#14-kubernetes-gpu--一个-pod-能用多卡-不等于多节点" aria-label="链接到本节">#</a></h2>
 <p>单个 Pod 的设备请求由一个节点满足，不能靠申请更多 GPU 自动跨越多个节点。多节点训练通常由多个 Pod 加上 rendezvous、rank 和进程组配置组成逻辑作业。</p>
 <p>这组进程还需要网络连通、共同版本及足够的启动资源。每个 Pod 各自拿到卡，不代表整个 world 已经可以执行 collective。</p>
-<h2 id="排障顺序">排障顺序<a class="anchor" href="#排障顺序" aria-label="链接到本节">#</a></h2>
+<h2 id="14-kubernetes-gpu--排障顺序">排障顺序<a class="anchor" href="#14-kubernetes-gpu--排障顺序" aria-label="链接到本节">#</a></h2>
 <p>在节点上确认设备与驱动，再查插件是否报告健康资源，随后查看 Pod 申请和调度事件。容器启动后核对设备与库可见性，最后进入应用的 local rank、初始化和通信。</p>
 <p>这条路线由下层事实逐步走向应用，不会把节点故障、资源不足和模型 OOM 混成一个 CUDA 问题。保留事件和首错后再执行重启。</p>
-<h3 id="用故障所在层选择检查命令">用故障所在层选择检查命令<a class="anchor" href="#用故障所在层选择检查命令" aria-label="链接到本节">#</a></h3>
+<h3 id="14-kubernetes-gpu--用故障所在层选择检查命令">用故障所在层选择检查命令<a class="anchor" href="#14-kubernetes-gpu--用故障所在层选择检查命令" aria-label="链接到本节">#</a></h3>
 <p><code>nvidia-smi</code> 用来检查主机设备，节点资源和 Pod event 用来解释分配，容器内设备与库检查解释运行时，rank 日志解释协作初始化。某层结果正常，只能排除相应问题，不能顺便证明下一层正确。</p>
 <p>若多节点挂起，先确认全部参与者是否进入同一 rendezvous，再核对网络和 collective。无需因为最后显示通信超时，就重新安装整个设备插件。</p>
-<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<h2 id="14-kubernetes-gpu--源码入口">源码入口<a class="anchor" href="#14-kubernetes-gpu--源码入口" aria-label="链接到本节">#</a></h2>
 <p>启动注册可查 <code>k8s-device-plugin/cmd/nvidia-device-plugin/</code>，分配路径在 <code>k8s-device-plugin/internal/plugin/</code>，资源发现与 MIG 组织分别参考 <code>internal/rm/</code> 和 <code>internal/mig/</code>。结合 Kubernetes 的 Schedule GPUs 文档，把代码职责放回节点选择与容器启动的阶段中理解。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">15</div><h1>批作业调度：为什么要一起开跑</h1></header><div class="prose"><p>夜间训练需要多个进程协作。如果只给其中部分进程设备，它们可能一直等待其他成员，已经分到的卡却无法交付任何训练结果。作业级准入要避免这种半组占用。</p>
-<h2 id="普通逐-pod-调度的问题">普通逐 Pod 调度的问题<a class="anchor" href="#普通逐-pod-调度的问题" aria-label="链接到本节">#</a></h2>
+<h2 id="15-batch-scheduling--普通逐-pod-调度的问题">普通逐 Pod 调度的问题<a class="anchor" href="#15-batch-scheduling--普通逐-pod-调度的问题" aria-label="链接到本节">#</a></h2>
 <p>考虑两个作业，各要求三个协作 Pod，而当前只能容纳四个。若各启动两个，就出现两组都缺最后成员、却没有剩余槽位的状态。单个 Pod 看起来分配成功，作业整体没有前进。</p>
 <p>平台需要根据真实协作下界判断是否准入，再安排成员，而非仅优化每个独立 Pod 的放置成功率。</p>
-<h2 id="gang-scheduling">Gang Scheduling<a class="anchor" href="#gang-scheduling" aria-label="链接到本节">#</a></h2>
+<h2 id="15-batch-scheduling--gang-scheduling">Gang Scheduling<a class="anchor" href="#15-batch-scheduling--gang-scheduling" aria-label="链接到本节">#</a></h2>
 <p>gang 策略将最小成员或资源需求作为启动条件。不满足时等待，满足时让必要成员获得资源。这能减少无效半启动，却可能为大组保留资源并产生暂时空闲。</p>
 <p>准入条件应来自运行时合同，例如必须同时存在的训练 worker 数，而不是把日志收集或辅助容器也机械计入计算门槛。</p>
-<h3 id="一起获得资源-不等于同一瞬间开始计算">一起获得资源，不等于同一瞬间开始计算<a class="anchor" href="#一起获得资源-不等于同一瞬间开始计算" aria-label="链接到本节">#</a></h3>
+<h3 id="15-batch-scheduling--一起获得资源-不等于同一瞬间开始计算">一起获得资源，不等于同一瞬间开始计算<a class="anchor" href="#15-batch-scheduling--一起获得资源-不等于同一瞬间开始计算" aria-label="链接到本节">#</a></h3>
 <p>资源满足后，成员仍要拉取镜像、加载模型、读取数据和加入 rendezvous。某一个准备缓慢，其他 rank 仍会等它。作业监控应拆开“等待准入”和“已准入但等待协作”。</p>
 <p>若一个辅助服务失败就应阻止开跑，也需显式写入启动条件。调度数量正确不能替代业务就绪检查。</p>
-<h2 id="volcano-的基本对象">Volcano 的基本对象<a class="anchor" href="#volcano-的基本对象" aria-label="链接到本节">#</a></h2>
+<figure class="diagram" tabindex="0" data-review-figure="infra-gang-admission">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 396" role="img" aria-labelledby="15-batch-scheduling--infra-gang-admission-title 15-batch-scheduling--infra-gang-admission-desc" style="display:block;width:100%;min-width:620px;height:auto">
+<title id="15-batch-scheduling--infra-gang-admission-title">4 个槽位，两个各需 3 个成员的作业</title>
+<desc id="15-batch-scheduling--infra-gang-admission-desc">逐 Pod 分配：2 + 2：两个作业都缺 1 个成员，无空槽可用；作业级准入：3 + 0：先让一个完整组获得资源，另一个等待；已分配仍需协作就绪：镜像、加载与 rendezvous 完成后再开跑。3 + 0 只是准入示例，不代表剩余 1 槽必须闲置。</desc>
+<rect width="960" height="396" fill="var(--paper,#faf8f1)"/>
+<g font-family="'IBM Plex Sans','Noto Sans CJK SC',system-ui,sans-serif"><text x="40" y="48" font-size="28" fill="var(--ink,#243b48)" text-anchor="start">4 个槽位，两个各需 3 个成员的作业</text><path d="M176 144 L176 164" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 157 L176 164 L181 157" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="88" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">逐 Pod 分配：2 + 2</text><text x="344" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">两个作业都缺 1 个成员，无空槽可用</text><path d="M176 224 L176 244" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 237 L176 244 L181 237" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="168" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">作业级准入：3 + 0</text><text x="344" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">先让一个完整组获得资源，另一个等待</text><rect x="40" y="248" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#e5ede9))" stroke="var(--forest,var(--accent,#29564c))"/><text x="56" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">已分配仍需协作就绪</text><text x="344" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">镜像、加载与 rendezvous 完成后再开跑</text><path d="M40 332H920" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="40" y="368" font-size="18" fill="var(--muted,#536772)" text-anchor="start">3 + 0 只是准入示例，不代表剩余 1 槽必须闲置。</text></g>
+</svg>
+<figcaption>图：3 + 0 只是准入示例，不代表剩余 1 槽必须闲置。</figcaption>
+</figure>
+
+<h2 id="15-batch-scheduling--volcano-的基本对象">Volcano 的基本对象<a class="anchor" href="#15-batch-scheduling--volcano-的基本对象" aria-label="链接到本节">#</a></h2>
 <p>Job 描述任务角色与生命周期，PodGroup 描述需要协同的成员，Queue 表达资源组织和策略范围，调度插件实现 gang、公平、优先级或装箱等规则，控制器负责把期望转换成实际对象。</p>
 <p>这些对象管理资源进入条件，不执行模型梯度或 collective。运行时与批调度器之间要约定故障、重启和保存信号。</p>
-<h2 id="队列-公平与利用率">队列、公平与利用率<a class="anchor" href="#队列-公平与利用率" aria-label="链接到本节">#</a></h2>
-<h3 id="fifo">FIFO<a class="anchor" href="#fifo" aria-label="链接到本节">#</a></h3>
+<h2 id="15-batch-scheduling--队列-公平与利用率">队列、公平与利用率<a class="anchor" href="#15-batch-scheduling--队列-公平与利用率" aria-label="链接到本节">#</a></h2>
+<h3 id="15-batch-scheduling--fifo">FIFO<a class="anchor" href="#15-batch-scheduling--fifo" aria-label="链接到本节">#</a></h3>
 <p>按顺序容易让用户理解等待，但队首大作业可能暂时无法运行，后面较小的作业也被挡住。若采用绕过规则，应把它说明为策略，而非暗中改变顺序。</p>
-<h3 id="priority">Priority<a class="anchor" href="#priority" aria-label="链接到本节">#</a></h3>
+<h3 id="15-batch-scheduling--priority">Priority<a class="anchor" href="#15-batch-scheduling--priority" aria-label="链接到本节">#</a></h3>
 <p>优先级可支持紧急校对任务，但需定义是否允许抢占、最长等待和普通任务的保障。否则高优任务持续到来时，低优队列可能长期没有进展。</p>
-<h3 id="drf">DRF<a class="anchor" href="#drf" aria-label="链接到本节">#</a></h3>
+<h3 id="15-batch-scheduling--drf">DRF<a class="anchor" href="#15-batch-scheduling--drf" aria-label="链接到本节">#</a></h3>
 <p>主导资源公平用于协调多资源份额，不能简单等同于平均 GPU 张数。不同卡型、显存和网络拓扑会使同一数量具有不同可用能力，资源分类仍需平台定义。</p>
-<h3 id="binpack">Binpack<a class="anchor" href="#binpack" aria-label="链接到本节">#</a></h3>
+<h3 id="15-batch-scheduling--binpack">Binpack<a class="anchor" href="#15-batch-scheduling--binpack" aria-label="链接到本节">#</a></h3>
 <p>将兼容任务尽量集中，可以留下完整节点或互联域给大作业。集中也可能带来电力、温度或故障域风险，因此应把设备可用性与基础设施约束一起考虑。</p>
-<h2 id="backfill">Backfill<a class="anchor" href="#backfill" aria-label="链接到本节">#</a></h2>
+<h2 id="15-batch-scheduling--backfill">Backfill<a class="anchor" href="#15-batch-scheduling--backfill" aria-label="链接到本节">#</a></h2>
 <p>大作业等待资源窗口时，可以让能在窗口前退出的小作业暂时利用空闲容量。前提是时长估计可信，或任务具有可接受的抢占和恢复合同。</p>
 <p>训练时长受数据、保存和故障影响，用户填写“几分钟”并不是保证。可以使用明确最大运行时，超出时按约定退出，而非让临时任务无限拖延已承诺的大作业。</p>
-<h3 id="公平-碎片和等待为什么不能同时简单最大化">公平、碎片和等待为什么不能同时简单最大化<a class="anchor" href="#公平-碎片和等待为什么不能同时简单最大化" aria-label="链接到本节">#</a></h3>
+<h3 id="15-batch-scheduling--公平-碎片和等待为什么不能同时简单最大化">公平、碎片和等待为什么不能同时简单最大化<a class="anchor" href="#15-batch-scheduling--公平-碎片和等待为什么不能同时简单最大化" aria-label="链接到本节">#</a></h3>
 <p>立刻填满所有空卡有利于短期利用率，却可能一直凑不齐大组。为大组保留资源会产生眼前空闲，却可能缩短它的整体等待。评估策略要同时看用户等待、有效计算与拓扑碎片。</p>
 <p>公平份额和紧急优先级也可能冲突。平台应公开它选择保护的目标，并用真实或可重放作业序列检查长期饥饿。</p>
-<h2 id="抢占不是-kill-9-就结束">抢占不是 kill -9 就结束<a class="anchor" href="#抢占不是-kill-9-就结束" aria-label="链接到本节">#</a></h2>
+<h2 id="15-batch-scheduling--抢占不是-kill-9-就结束">抢占不是 kill -9 就结束<a class="anchor" href="#15-batch-scheduling--抢占不是-kill-9-就结束" aria-label="链接到本节">#</a></h2>
 <p>可恢复抢占需要一条完整协议：发出终止通知，停止开始新步骤，在规定时间内完成一致保存，退出并释放资源，后续再选择可用状态恢复。宽限期与保存能力不匹配时，会损失未提交进度。</p>
 <p>平台要定义超时后怎样处理，也要避免同时驱逐过多作业形成 checkpoint 写入风暴。抢占延迟应包括保存与设备真正释放，而非只记录信号发送。</p>
-<h2 id="拓扑约束">拓扑约束<a class="anchor" href="#拓扑约束" aria-label="链接到本节">#</a></h2>
+<h2 id="15-batch-scheduling--拓扑约束">拓扑约束<a class="anchor" href="#15-batch-scheduling--拓扑约束" aria-label="链接到本节">#</a></h2>
 <p>协作组可能要求同一高速域、相同设备规格或特定网络亲和。数据本地性与故障域也会影响选择。每增加一种约束，调度可行空间都会缩小。</p>
 <p>向用户提供经过验证的少量模板通常比任意 affinity 组合更可靠。模板中同时固定镜像、通信配置和恢复方式，防止资源看似满足却无法运行。</p>
-<h3 id="抢占回收的是资源-损失的是已做计算">抢占回收的是资源，损失的是已做计算<a class="anchor" href="#抢占回收的是资源-损失的是已做计算" aria-label="链接到本节">#</a></h3>
+<h3 id="15-batch-scheduling--抢占回收的是资源-损失的是已做计算">抢占回收的是资源，损失的是已做计算<a class="anchor" href="#15-batch-scheduling--抢占回收的是资源-损失的是已做计算" aria-label="链接到本节">#</a></h3>
 <p>假设最新可用保存点之后已训练 12 分钟，此时强制退出会丢掉这段工作。若愿意等 40 秒完成新保存，可以减少重算，但紧急任务也多等这 40 秒。两种成本都应记录。</p>
 <p>真正恢复后核对选择了哪份 checkpoint、损失多少步及数据位置。只统计“几秒释放 GPU”会隐藏被抢占方的计算损失。</p>
-<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<h2 id="15-batch-scheduling--源码入口">源码入口<a class="anchor" href="#15-batch-scheduling--源码入口" aria-label="链接到本节">#</a></h2>
 <p>从 <code>volcano/pkg/scheduler/</code> 追作业与队列决策，gang 条件可进入 <code>volcano/pkg/scheduler/plugins/gang/</code>。实际 Job 与 PodGroup 的生命周期分别查 <code>volcano/pkg/controllers/job/</code> 和 <code>volcano/pkg/controllers/podgroup/</code>，结合架构与插件文档核对当前快照的策略配置。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">16</div><h1>在线服务：网关、队列、副本与扩缩容</h1></header><div class="prose"><p>开放档案问答后，工作量会随着读者人数、日志长度与生成要求变化。可靠服务需要在接入前限制不可能完成的工作，在副本间分配负载，并为缓慢启动的新容量留出时间。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" role="img" aria-label="流量选择与容量准备是两条链"><title>流量选择与容量准备是两条链</title><rect width="960" height="470" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">流量选择与容量准备是两条链</text><rect x="30" y="105" width="175" height="90" fill="#e7eef0" stroke="#bfc8cc"/><text x="44" y="134" font-size="19" fill="#202b32" text-anchor="start">接入与边界</text><text x="44" y="160" font-size="15" fill="#56616b" text-anchor="start">模型、租户、长度</text><path d="M205 150 L255 150" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="255.0,150.0 245.8,153.9 245.8,146.1" fill="#245d79"/><rect x="260" y="85" width="230" height="70" fill="#e7eef0" stroke="#bfc8cc"/><text x="274" y="114" font-size="19" fill="#202b32" text-anchor="start">模型 A 就绪组</text><text x="274" y="140" font-size="15" fill="#56616b" text-anchor="start">新请求只到 Ready</text><rect x="260" y="190" width="230" height="70" fill="#e7eef0" stroke="#bfc8cc"/><text x="274" y="219" font-size="19" fill="#202b32" text-anchor="start">模型 B 就绪组</text><text x="274" y="245" font-size="15" fill="#56616b" text-anchor="start">独立容量合同</text><rect x="620" y="85" width="290" height="70" fill="#e7eef0" stroke="#bfc8cc"/><text x="634" y="114" font-size="19" fill="#202b32" text-anchor="start">旧版本排空组</text><text x="634" y="140" font-size="15" fill="#56616b" text-anchor="start">不接新工作，处理已有流</text><path d="M490 120 L615 120" stroke="#56616b" stroke-width="2" fill="none" stroke-dasharray="6 5"/><text x="520" y="185" font-size="16" fill="#56616b" text-anchor="start">版本切换</text><rect x="60" y="315" width="260" height="65" fill="#e7eef0" stroke="#bfc8cc"/><text x="74" y="344" font-size="19" fill="#202b32" text-anchor="start">下载</text><text x="74" y="370" font-size="15" fill="#56616b" text-anchor="start">限制同时准备数</text><path d="M320 347 L355 347" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="355.0,347.0 345.8,350.9 345.8,343.1" fill="#245d79"/><rect x="360" y="315" width="260" height="65" fill="#e7eef0" stroke="#bfc8cc"/><text x="374" y="344" font-size="19" fill="#202b32" text-anchor="start">加载 / 预热</text><text x="374" y="370" font-size="15" fill="#56616b" text-anchor="start">端口开放还不够</text><path d="M620 347 L655 347" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="655.0,347.0 645.8,350.9 645.8,343.1" fill="#245d79"/><rect x="660" y="315" width="260" height="65" fill="#e7eef0" stroke="#bfc8cc"/><text x="674" y="344" font-size="19" fill="#202b32" text-anchor="start">就绪</text><text x="674" y="370" font-size="15" fill="#56616b" text-anchor="start">才计入可服务容量</text><text x="30" y="430" font-size="18" fill="#a14929" text-anchor="start">准备链不能即时吸收突发；等待队列必须有长度与时限边界。</text></g></svg>
 <figcaption>图：双模型路由到不同就绪组，旧组独立排空；旁边是下载、预热、就绪的容量准备链。</figcaption></figure>
 
-<h2 id="数据面组件">数据面组件<a class="anchor" href="#数据面组件" aria-label="链接到本节">#</a></h2>
-<h3 id="gateway">Gateway<a class="anchor" href="#gateway" aria-label="链接到本节">#</a></h3>
+<h2 id="16-serving-cluster--数据面组件">数据面组件<a class="anchor" href="#16-serving-cluster--数据面组件" aria-label="链接到本节">#</a></h2>
+<h3 id="16-serving-cluster--gateway">Gateway<a class="anchor" href="#16-serving-cluster--gateway" aria-label="链接到本节">#</a></h3>
 <p>入口建立身份与额度边界，验证输入和输出上限，并选择模型。应尽早拒绝明显不支持的长度，避免让请求排了很久后才发现无法运行。拒绝结果也要有明确可重试语义。</p>
-<h3 id="replica">Replica<a class="anchor" href="#replica" aria-label="链接到本节">#</a></h3>
+<h3 id="16-serving-cluster--replica">Replica<a class="anchor" href="#16-serving-cluster--replica" aria-label="链接到本节">#</a></h3>
 <p>逻辑副本提供一份可服务能力，可能包含前端与一个设备工作组。副本数、Pod 数和 GPU 数没有固定一一对应，应在拓扑图中写出实际关系。</p>
-<h3 id="gpu-worker-group">GPU Worker Group<a class="anchor" href="#gpu-worker-group" aria-label="链接到本节">#</a></h3>
+<h3 id="16-serving-cluster--gpu-worker-group">GPU Worker Group<a class="anchor" href="#16-serving-cluster--gpu-worker-group" aria-label="链接到本节">#</a></h3>
 <p>一个 TP 或 PP 副本可能依赖多个进程。就绪检查应确认必要参与者可以共同执行，而不是只检查前端端口。单个坏 rank 可能影响这组中的全部请求。</p>
-<h3 id="queue">Queue<a class="anchor" href="#queue" aria-label="链接到本节">#</a></h3>
+<h3 id="16-serving-cluster--queue">Queue<a class="anchor" href="#16-serving-cluster--queue" aria-label="链接到本节">#</a></h3>
 <p>有界队列可以吸收短突发，但等待本身要计入用户预算。长度、等待时限、租户份额和过载策略都应显式配置。无限排队会把容量不足延迟成大规模超时。</p>
-<h2 id="路由的三个层次">路由的三个层次<a class="anchor" href="#路由的三个层次" aria-label="链接到本节">#</a></h2>
+<h2 id="16-serving-cluster--路由的三个层次">路由的三个层次<a class="anchor" href="#16-serving-cluster--路由的三个层次" aria-label="链接到本节">#</a></h2>
 <p>先确定请求允许使用哪个模型或 adapter，再挑选就绪副本，最后由该副本的引擎选择本轮执行。模型权限、整体负载和 token 调度对应不同层，不宜塞进一个模糊的“智能路由”概念。</p>
 <p>副本选择可考虑剩余工作、KV 压力和可复用前缀，但采集状态有延迟。多个路由器同时选择看似最空的副本，也可能瞬间制造热点。</p>
-<h3 id="两个副本排队条数相同-剩余工作也可能不同">两个副本排队条数相同，剩余工作也可能不同<a class="anchor" href="#两个副本排队条数相同-剩余工作也可能不同" aria-label="链接到本节">#</a></h3>
+<h3 id="16-serving-cluster--两个副本排队条数相同-剩余工作也可能不同">两个副本排队条数相同，剩余工作也可能不同<a class="anchor" href="#16-serving-cluster--两个副本排队条数相同-剩余工作也可能不同" aria-label="链接到本节">#</a></h3>
 <p>假设两个副本各等待三条请求，甲的输入合计 600 token，乙的合计 12,000 token。仅按请求数它们相同，实际输入工作显然不同；还需加上正在生成的历史状态与预期输出。</p>
 <p>缓存亲和可能节省输入计算，却也可能把同类请求集中到一处。应测“命中收益减去新增等待”的净效果，而不是追求最高命中率。</p>
-<h2 id="autoscaling-看什么">Autoscaling 看什么<a class="anchor" href="#autoscaling-看什么" aria-label="链接到本节">#</a></h2>
+<h2 id="16-serving-cluster--autoscaling-看什么">Autoscaling 看什么<a class="anchor" href="#16-serving-cluster--autoscaling-看什么" aria-label="链接到本节">#</a></h2>
 <p>可以把等待 token、首字分位数、活跃状态和完成能力作为主要信号，再结合设备与 CPU 指标解释原因。设备利用率低可能是需求少，也可能是输入或通信供给不畅。</p>
 <p>扩缩决策需迟滞和稳定窗口，避免短抖动反复创建与删除昂贵副本。就绪容量与正在准备容量应分列，否则 replicas 上升会被误认为用户已经获得帮助。</p>
-<h2 id="冷启动决定提前量">冷启动决定提前量<a class="anchor" href="#冷启动决定提前量" aria-label="链接到本节">#</a></h2>
+<h2 id="16-serving-cluster--冷启动决定提前量">冷启动决定提前量<a class="anchor" href="#16-serving-cluster--冷启动决定提前量" aria-label="链接到本节">#</a></h2>
 <p>假设教学部署下载、加载和预热合计需要 5 分钟。若到首字目标已经失守才申请新副本，现有突发不会被立刻吸收。可以维持最小热容量、提前在候选节点缓存模型，并按周期需求预扩。</p>
 <p>同时限制准备并发，防止所有副本争抢同一远端存储。扩容链的最慢阶段可能随并发而变化，应测从申请到可接真实请求的完整时间。</p>
-<h3 id="扩容来不及的时候-队列必须有上限">扩容来不及的时候，队列必须有上限<a class="anchor" href="#扩容来不及的时候-队列必须有上限" aria-label="链接到本节">#</a></h3>
+<h3 id="16-serving-cluster--扩容来不及的时候-队列必须有上限">扩容来不及的时候，队列必须有上限<a class="anchor" href="#16-serving-cluster--扩容来不及的时候-队列必须有上限" aria-label="链接到本节">#</a></h3>
 <p>若用户可接受等待只有数秒，新副本要几分钟才能就绪，当前过载必须通过限流、降级或转异步处理应对。无限接收只会把未来几分钟的工作堆成无法兑现的承诺。</p>
 <p>拒绝策略应考虑租户公平和客户端退避，避免一个同步导入任务占尽全部交互队列。扩容解决后续容量，不替代当下的入口保护。</p>
-<h2 id="kuberay-与-operator-模式">KubeRay 与 Operator 模式<a class="anchor" href="#kuberay-与-operator-模式" aria-label="链接到本节">#</a></h2>
+<h2 id="16-serving-cluster--kuberay-与-operator-模式">KubeRay 与 Operator 模式<a class="anchor" href="#16-serving-cluster--kuberay-与-operator-模式" aria-label="链接到本节">#</a></h2>
 <p>KubeRay 用 RayCluster、RayJob、RayService 等对象管理 Ray 相关生命周期。需要 Ray 分布式运行时的方案可以利用它表达期望与调和；单机模型副本则可能用普通 Deployment 就能满足需求。</p>
 <p>选用控制器应基于明确生命周期问题，如整组准备与版本切换，而非因为项目名称里带 AI。新增控制层也意味着新的升级与排障职责。</p>
-<h2 id="滚动升级的-drain">滚动升级的 drain<a class="anchor" href="#滚动升级的-drain" aria-label="链接到本节">#</a></h2>
+<h2 id="16-serving-cluster--滚动升级的-drain">滚动升级的 drain<a class="anchor" href="#16-serving-cluster--滚动升级的-drain" aria-label="链接到本节">#</a></h2>
 <p>新组完成验证后逐步接入，旧组先退出接入集合，再等待已有生成结束或触及 deadline。超过期限时应明确返回失败和重试语义，不能默认已流出文本会被新组无缝续写。</p>
 <p>保留旧版本产物与回退配置，并确认更新期设备容量足够。切换成功不仅是新副本出现，还包括旧连接得到一致处理。</p>
-<h2 id="容量规划的单位">容量规划的单位<a class="anchor" href="#容量规划的单位" aria-label="链接到本节">#</a></h2>
+<h2 id="16-serving-cluster--容量规划的单位">容量规划的单位<a class="anchor" href="#16-serving-cluster--容量规划的单位" aria-label="链接到本节">#</a></h2>
 <p>将输入与输出长度分开，按代表性类别测每副本可承受的到达率和延迟。请求速率仍有业务意义，但无法脱离长度与成功率单独描述资源需求。</p>
 <p>一份副本容量表应给出达到目标的工作点，而非只列灌满时的峰值 tokens/s。还需保留至少一种故障或突发余量假设。</p>
-<h3 id="缩容为什么要先停止接新请求">缩容为什么要先停止接新请求<a class="anchor" href="#缩容为什么要先停止接新请求" aria-label="链接到本节">#</a></h3>
+<h3 id="16-serving-cluster--缩容为什么要先停止接新请求">缩容为什么要先停止接新请求<a class="anchor" href="#16-serving-cluster--缩容为什么要先停止接新请求" aria-label="链接到本节">#</a></h3>
 <p>准备删除的副本若仍接新工作，排空时间会不断向后推。停止接入后，活跃工作才有机会单调减少。要区分连接还在、引擎已完成和客户端已收到结束三个状态。</p>
 <p>按整组排空多 rank 副本，避免部分参与者先退出破坏所有剩余请求。缩容验收还应确认块、连接和计费状态最终得到清理。</p>
-<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<h2 id="16-serving-cluster--源码入口">源码入口<a class="anchor" href="#16-serving-cluster--源码入口" aria-label="链接到本节">#</a></h2>
 <p>HTTP 接入看 <code>vllm/entrypoints/openai/</code>，引擎接口看 <code>vllm/v1/engine/</code>，协作组看 <code>vllm/distributed/</code>。Ray 相关生命周期与监控入口可从 <code>kuberay/ray-operator/</code> 和 <code>kuberay/config/prometheus/</code> 查起，核对实际部署启用了哪些组件再进入对应代码。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">17</div><h1>可观测性、SLO 与成本</h1></header><div class="prose"><p>读者说“问答卡住”，值班人员需要判断是尚未开始、生成中断，还是网络没有送到。指标应帮助还原这个过程，而不只是证明监控系统采集了很多数字。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 475" role="img" aria-label="一条请求的阶段耗时，不能只看总长"><title>一条请求的阶段耗时，不能只看总长</title><rect width="960" height="475" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">一条请求的阶段耗时，不能只看总长</text><text x="30" y="130" font-size="18" fill="#202b32" text-anchor="start">接入</text><rect x="190.0" y="105" width="10.8" height="30" fill="#245d79" stroke="#bfc8cc"/><text x="210.8" y="128" font-size="16" fill="#202b32" text-anchor="start">12 ms</text><text x="30" y="179" font-size="18" fill="#202b32" text-anchor="start">等待</text><rect x="200.8" y="154" width="70.2" height="30" fill="#a14929" stroke="#bfc8cc"/><text x="281.0" y="177" font-size="16" fill="#202b32" text-anchor="start">78 ms</text><text x="30" y="228" font-size="18" fill="#202b32" text-anchor="start">输入执行</text><rect x="271.0" y="203" width="58.5" height="30" fill="#245d79" stroke="#bfc8cc"/><text x="339.5" y="226" font-size="16" fill="#202b32" text-anchor="start">65 ms</text><text x="30" y="277" font-size="18" fill="#202b32" text-anchor="start">生成</text><rect x="329.5" y="252" width="432.0" height="30" fill="#a14929" stroke="#bfc8cc"/><text x="771.5" y="275" font-size="16" fill="#202b32" text-anchor="start">480 ms</text><text x="30" y="326" font-size="18" fill="#202b32" text-anchor="start">末段回传</text><rect x="761.5" y="301" width="22.5" height="30" fill="#245d79" stroke="#bfc8cc"/><text x="794.0" y="324" font-size="16" fill="#202b32" text-anchor="start">25 ms</text><path d="M190 365 L800 365" stroke="#bfc8cc" stroke-width="2" fill="none"/><text x="190" y="390" font-size="16" fill="#202b32" text-anchor="start">0</text><text x="784" y="390" font-size="16" fill="#202b32" text-anchor="start">660 ms</text><text x="30" y="435" font-size="17" fill="#56616b" text-anchor="start">首字边界与客户端收到时间需按测量口径定义；末段回传不能算作模型执行。</text></g></svg>
 <figcaption>图：教学请求在 0、12、90、155、635、660 ms 的阶段边界，区分引擎等待、生成与末段回传。</figcaption></figure>
 
-<h2 id="用户层指标">用户层指标<a class="anchor" href="#用户层指标" aria-label="链接到本节">#</a></h2>
-<h3 id="ttft">TTFT<a class="anchor" href="#ttft" aria-label="链接到本节">#</a></h3>
+<h2 id="17-observability--用户层指标">用户层指标<a class="anchor" href="#17-observability--用户层指标" aria-label="链接到本节">#</a></h2>
+<h3 id="17-observability--ttft">TTFT<a class="anchor" href="#17-observability--ttft" aria-label="链接到本节">#</a></h3>
 <p>首 token 或首个可见增量的时间需定义起止点。它包含接入、分词、排队、输入执行与回传。客户端和服务端测得的值可以不同，仪表盘应标明测量位置。</p>
-<h3 id="tpot-itl">TPOT / ITL<a class="anchor" href="#tpot-itl" aria-label="链接到本节">#</a></h3>
+<h3 id="17-observability--tpot-itl">TPOT / ITL<a class="anchor" href="#17-observability--tpot-itl" aria-label="链接到本节">#</a></h3>
 <p>TPOT 描述生成阶段平均每输出位置的耗时，ITL 关注相邻输出之间的间隔。均值适合量级比较，分位数和单请求时间序列更容易暴露停顿。网络聚合会影响客户端所见间隔，不能直接等同设备 token 间隔。</p>
-<h3 id="e2e-latency">E2E latency<a class="anchor" href="#e2e-latency" aria-label="链接到本节">#</a></h3>
+<h3 id="17-observability--e2e-latency">E2E latency<a class="anchor" href="#17-observability--e2e-latency" aria-label="链接到本节">#</a></h3>
 <p>从开始到最终完成的时间受到输出长度强烈影响。按输入、输出长度和任务类别分组，再比较分位数，避免长回答比例上升被误认为系统退化。</p>
-<h3 id="成功率与取消率">成功率与取消率<a class="anchor" href="#成功率与取消率" aria-label="链接到本节">#</a></h3>
+<h3 id="17-observability--成功率与取消率">成功率与取消率<a class="anchor" href="#17-observability--成功率与取消率" aria-label="链接到本节">#</a></h3>
 <p>分别记录入口拒绝、排队超时、设备错误、客户端主动取消和内容策略结果。响应状态码不是完整业务语义，返回 200 但流中断也不应被记成成功完成。</p>
-<h2 id="引擎层指标">引擎层指标<a class="anchor" href="#引擎层指标" aria-label="链接到本节">#</a></h2>
+<h2 id="17-observability--引擎层指标">引擎层指标<a class="anchor" href="#17-observability--引擎层指标" aria-label="链接到本节">#</a></h2>
 <p>等待与运行序列、输入输出速率、块池占用、抢占重算、前缀命中和每轮耗时，可以把用户症状连接到引擎状态。指标命名随版本变化，先确认定义再聚合。</p>
 <p>特别区分“本轮有执行”和“本轮交付了有效结果”。重算与反复抢占可能使设备很忙，但用户完成率不升。</p>
-<h3 id="同样-ttft-上升-可能需要完全不同的行动">同样 TTFT 上升，可能需要完全不同的行动<a class="anchor" href="#同样-ttft-上升-可能需要完全不同的行动" aria-label="链接到本节">#</a></h3>
+<h3 id="17-observability--同样-ttft-上升-可能需要完全不同的行动">同样 TTFT 上升，可能需要完全不同的行动<a class="anchor" href="#17-observability--同样-ttft-上升-可能需要完全不同的行动" aria-label="链接到本节">#</a></h3>
 <p>若等待增长、执行速率稳定且设备饱和，考虑容量或入口负载；若输入执行随长度上升，考虑分桶与分块；若设备空闲而分词队列繁忙，查 CPU 与文本处理。三个现象都能产生同一条首字告警。</p>
 <p>对正在生成的请求，再核对抢占与 ITL 尾部。总体 token 速率稳定并不能排除某个租户被长期推迟。</p>
-<h2 id="gpu-与系统指标">GPU 与系统指标<a class="anchor" href="#gpu-与系统指标" aria-label="链接到本节">#</a></h2>
+<h2 id="17-observability--gpu-与系统指标">GPU 与系统指标<a class="anchor" href="#17-observability--gpu-与系统指标" aria-label="链接到本节">#</a></h2>
 <p>设备执行、显存带宽、allocated 与 reserved、互联流量和硬件错误帮助解释资源。CPU、NUMA、磁盘及远端存储则解释供给和保存。把这些曲线与版本、运行和阶段事件关联，才知道某次尖峰对应什么工作。</p>
 <p>同一图上不要混合无法相加的口径，例如把 allocator reserved 与驱动总占用当作两项独立内存。对每个指标写明层级、单位和采样周期。</p>
-<h2 id="little-39-s-law">Little&#39;s Law<a class="anchor" href="#little-39-s-law" aria-label="链接到本节">#</a></h2>
+<h2 id="17-observability--little-39-s-law">Little&#39;s Law<a class="anchor" href="#17-observability--little-39-s-law" aria-label="链接到本节">#</a></h2>
 <p>在符合稳定平均条件、边界一致的系统中，<code>L = λ × W</code>：平均在内数量等于平均到达率乘平均停留时间。</p>
 <p>假设引擎每秒进入 6 条请求，平均停留 3 秒，平均在内约 18 条。它适合做量级检查，不会自动给出 GPU 数或尾延迟，更不能用平均值保证最坏情况。</p>
-<h3 id="little-39-s-law-的时间范围要对应同一个系统">Little&#39;s Law 的时间范围要对应同一个系统<a class="anchor" href="#little-39-s-law-的时间范围要对应同一个系统" aria-label="链接到本节">#</a></h3>
+<h3 id="17-observability--little-39-s-law-的时间范围要对应同一个系统">Little&#39;s Law 的时间范围要对应同一个系统<a class="anchor" href="#17-observability--little-39-s-law-的时间范围要对应同一个系统" aria-label="链接到本节">#</a></h3>
 <p>若 L 只计引擎内请求，W 就应是进入到离开引擎的时间，而非浏览器完整体验。到达率也要用相应边界的计数。持续过载、队列不断增长的短窗口，不能假装已经达到稳定工作点。</p>
 <p>如果预测和观测差很多，先查边界、时间窗口与失败请求是否被漏计，再考虑更复杂模型。</p>
-<h2 id="slo-不能只有一个数字">SLO 不能只有一个数字<a class="anchor" href="#slo-不能只有一个数字" aria-label="链接到本节">#</a></h2>
+<h2 id="17-observability--slo-不能只有一个数字">SLO 不能只有一个数字<a class="anchor" href="#17-observability--slo-不能只有一个数字" aria-label="链接到本节">#</a></h2>
 <p>可以为档案目录交互设一个教学合同：输入不超过 1500 token、输出不超过 300 token，按一个月统计，99.5% 成功完成；在对应流量类中，p95 首字小于 1.2 秒，生成间隔采用独立目标。数字只是示例，应由实际产品与压测决定。</p>
 <p>明确是否排除主动取消，以及如何计入服务过载拒绝。长卷宗可单独进入异步类别，不能在坏结果出现后临时把它们从分母删除。</p>
-<h2 id="成本指标">成本指标<a class="anchor" href="#成本指标" aria-label="链接到本节">#</a></h2>
+<h2 id="17-observability--成本指标">成本指标<a class="anchor" href="#17-observability--成本指标" aria-label="链接到本节">#</a></h2>
 <p>设备小时价格只是单价，实际成本还包括热备闲置、冷启动、存储、传输和失败重算。可分别计算每百万有效输入、有效输出以及每类成功任务的成本，并保留分母定义。</p>
 <p>训练侧可以报告完成一定有效 token 的总成本，以及故障损失。不要把峰值吞吐换算成长期账单，而忽略保存与恢复。</p>
-<h3 id="成本分母也应该代表有用结果">成本分母也应该代表有用结果<a class="anchor" href="#成本分母也应该代表有用结果" aria-label="链接到本节">#</a></h3>
+<h3 id="17-observability--成本分母也应该代表有用结果">成本分母也应该代表有用结果<a class="anchor" href="#17-observability--成本分母也应该代表有用结果" aria-label="链接到本节">#</a></h3>
 <p>如果同一段输入因抢占计算三次，总处理量变大，却没有三倍业务产出。将重算位置计入有效交付，会让低效系统显得更便宜。应把实际消耗与去重后的有用结果分列。</p>
 <p>为了首字目标保留热副本，可能提高低流量单位成本。比较两种容量策略时固定体验目标与流量，不让较慢策略靠违反 SLO 获得表面优势。</p>
-<h2 id="cardinality-警告">Cardinality 警告<a class="anchor" href="#cardinality-警告" aria-label="链接到本节">#</a></h2>
+<h2 id="17-observability--cardinality-警告">Cardinality 警告<a class="anchor" href="#17-observability--cardinality-警告" aria-label="链接到本节">#</a></h2>
 <p>请求 ID、任意用户标识、完整提示词和动态字符串不宜直接作为 metrics label。高基数可能拖垮监控并泄露资料。受控日志和 trace 保存细粒度关联，指标使用有界维度，并配合保留与访问策略。</p>
-<h2 id="一张最小-dashboard">一张最小 Dashboard<a class="anchor" href="#一张最小-dashboard" aria-label="链接到本节">#</a></h2>
+<h2 id="17-observability--一张最小-dashboard">一张最小 Dashboard<a class="anchor" href="#17-observability--一张最小-dashboard" aria-label="链接到本节">#</a></h2>
 <p>第一行显示到达、完成、拒绝和用户延迟；第二行连接等待工作、活跃状态、有效 token 与缓存压力；第三行看设备供给、错误阶段和版本变化；最后显示准备中的容量及单位成功成本。</p>
 <p>每个面板应对应一个可执行问题，例如“增加副本是否有用”或“刚才发布是否改变了生成间隔”。若无法据此区分行动，就先补测量定义，而不是继续加图。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">18</div><h1>故障恢复：把失败当作正常路径</h1></header><div class="prose"><p>档案处理会遇到坏输入、进程异常、设备错误和半写入的保存状态。可靠性需要规定每类失败的处置边界，避免将一次局部问题放大成整组反复重启。</p>
 <figure class="diagram" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 465" role="img" aria-label="分类后恢复，不把所有失败都交给重启"><title>分类后恢复，不把所有失败都交给重启</title><rect width="960" height="465" fill="#faf9f4"/><g font-family="Noto Sans CJK SC,system-ui,sans-serif"><text x="30" y="40" font-size="25" fill="#202b32" text-anchor="start">分类后恢复，不把所有失败都交给重启</text><rect x="350" y="85" width="260" height="65" fill="#e7eef0" stroke="#bfc8cc"/><text x="364" y="114" font-size="19" fill="#202b32" text-anchor="start">检测异常</text><text x="364" y="140" font-size="15" fill="#56616b" text-anchor="start">保留首错与阶段</text><path d="M480 150 L120 225" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="120.0,225.0 128.2,219.3 129.8,226.9" fill="#245d79"/><rect x="30" y="225" width="180" height="90" fill="#e7eef0" stroke="#bfc8cc"/><text x="44" y="254" font-size="19" fill="#202b32" text-anchor="start">请求边界</text><text x="44" y="280" font-size="15" fill="#56616b" text-anchor="start">拒绝 / 明确结束</text><path d="M480 150 L360 225" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="360.0,225.0 365.7,216.8 369.9,223.4" fill="#245d79"/><rect x="270" y="225" width="180" height="90" fill="#e7eef0" stroke="#bfc8cc"/><text x="284" y="254" font-size="19" fill="#202b32" text-anchor="start">协作组失败</text><text x="284" y="280" font-size="15" fill="#56616b" text-anchor="start">重建一致参与者</text><path d="M480 150 L600 225" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="600.0,225.0 590.1,223.4 594.3,216.8" fill="#245d79"/><rect x="510" y="225" width="180" height="90" fill="#e7eef0" stroke="#bfc8cc"/><text x="524" y="254" font-size="19" fill="#202b32" text-anchor="start">设备异常</text><text x="524" y="280" font-size="15" fill="#56616b" text-anchor="start">隔离、诊断、验证</text><path d="M480 150 L840 225" stroke="#245d79" stroke-width="2" fill="none"/><polygon points="840.0,225.0 830.2,226.9 831.8,219.3" fill="#245d79"/><rect x="750" y="225" width="180" height="90" fill="#e7eef0" stroke="#bfc8cc"/><text x="764" y="254" font-size="19" fill="#202b32" text-anchor="start">保存不完整</text><text x="764" y="280" font-size="15" fill="#56616b" text-anchor="start">回退已提交版本</text><text x="40" y="390" font-size="19" fill="#202b32" text-anchor="start">恢复完成条件：可继续正确执行、资源已清理、状态可再次保存。</text><text x="40" y="425" font-size="18" fill="#a14929" text-anchor="start">Pod 重建只恢复组件存在，不自动重放业务结果。</text></g></svg>
 <figcaption>图：检测后先分类：请求终止、工作组重建、设备隔离或回退完整保存点，各分支有不同完成条件。</figcaption></figure>
 
-<h2 id="先划分故障域">先划分故障域<a class="anchor" href="#先划分故障域" aria-label="链接到本节">#</a></h2>
+<h2 id="18-failure-recovery--先划分故障域">先划分故障域<a class="anchor" href="#18-failure-recovery--先划分故障域" aria-label="链接到本节">#</a></h2>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
@@ -832,59 +872,59 @@ spec:
 </tr>
 </tbody></table></div>
 <p>这张表不是自动恢复算法。每个动作都需要触发条件和权限，破坏性设备重置或节点排空应遵守平台流程。</p>
-<h2 id="首错比连锁错误重要">首错比连锁错误重要<a class="anchor" href="#首错比连锁错误重要" aria-label="链接到本节">#</a></h2>
+<h2 id="18-failure-recovery--首错比连锁错误重要">首错比连锁错误重要<a class="anchor" href="#18-failure-recovery--首错比连锁错误重要" aria-label="链接到本节">#</a></h2>
 <p>组内某个进程先失败，其他进程往往稍后才在同步处报错。统一 run、step、rank 标识，并保存首个异常及相关形状，能避免被最后一屏 timeout 带偏。</p>
 <p>清理时出现的错误应作为附加信息，不能覆盖最初异常。重试前保存必要现场，否则下一轮可能只复现同一个模糊症状。</p>
-<h3 id="最后报错的进程-不一定是首先失败的进程">最后报错的进程，不一定是首先失败的进程<a class="anchor" href="#最后报错的进程-不一定是首先失败的进程" aria-label="链接到本节">#</a></h3>
+<h3 id="18-failure-recovery--最后报错的进程-不一定是首先失败的进程">最后报错的进程，不一定是首先失败的进程<a class="anchor" href="#18-failure-recovery--最后报错的进程-不一定是首先失败的进程" aria-label="链接到本节">#</a></h3>
 <p>假设 rank 5 在反向阶段出现非法数值并退出，rank 1 直到等待 collective 超时才报告错误。只看主进程会怀疑网络，查看 rank 5 的前置事件才能发现真正起点。</p>
 <p>跨节点时钟可能有偏差，除时间戳外还要看 step 和事件依赖。先发生的业务阶段错误与后发生的依赖失败，不一定能靠孤立时间排序完整还原。</p>
-<h2 id="在线推理的重试">在线推理的重试<a class="anchor" href="#在线推理的重试" aria-label="链接到本节">#</a></h2>
+<h2 id="18-failure-recovery--在线推理的重试">在线推理的重试<a class="anchor" href="#18-failure-recovery--在线推理的重试" aria-label="链接到本节">#</a></h2>
 <p>首个输出之前失败与已经输出半段答案不同。后者重试可能产生重复文本或另一份续写，应向客户端传递 attempt 与结果状态。外部工具写入还需业务幂等键和结果查询，不能由模型生成重试策略保证安全。</p>
 <p>客户端、网关和后端应共同限制重试预算，并采用退避。三层各重试几次会相乘放大流量，尤其在容量不足时容易使故障持续更久。</p>
-<h2 id="训练恢复">训练恢复<a class="anchor" href="#训练恢复" aria-label="链接到本节">#</a></h2>
+<h2 id="18-failure-recovery--训练恢复">训练恢复<a class="anchor" href="#18-failure-recovery--训练恢复" aria-label="链接到本节">#</a></h2>
 <p>先停止或重建一致的协作组，再选择最近完整且兼容的状态，加载参数、优化器、数据与随机状态，最后做小步验证。若改变并行布局，先确认格式和运行时支持所需重分片。</p>
 <p>恢复完成条件应包括可继续更新和可再次保存。只把进程启动起来，仍可能在下一次 collective 或 checkpoint 暴露不一致。</p>
-<h3 id="恢复的第一步-是找到完整且匹配的状态">恢复的第一步，是找到完整且匹配的状态<a class="anchor" href="#恢复的第一步-是找到完整且匹配的状态" aria-label="链接到本节">#</a></h3>
+<h3 id="18-failure-recovery--恢复的第一步-是找到完整且匹配的状态">恢复的第一步，是找到完整且匹配的状态<a class="anchor" href="#18-failure-recovery--恢复的第一步-是找到完整且匹配的状态" aria-label="链接到本节">#</a></h3>
 <p>最新目录可能属于未完成尝试，需根据提交记录与 metadata 选择。模型配置、数据版本和代码兼容同样重要，否则完整文件也可能不适合当前运行。</p>
 <p>演练应包括缺失一个 shard、旧格式状态和成员替换。明确哪些组合支持恢复，哪些必须回滚环境或转换格式，避免事故中临时试错。</p>
-<h2 id="operator-reconciliation">Operator Reconciliation<a class="anchor" href="#operator-reconciliation" aria-label="链接到本节">#</a></h2>
+<h2 id="18-failure-recovery--operator-reconciliation">Operator Reconciliation<a class="anchor" href="#18-failure-recovery--operator-reconciliation" aria-label="链接到本节">#</a></h2>
 <p>控制器比较期望与观测，再补足差异。例如期望两组就绪副本而实际只有一组，就创建或修复缺失组。重复执行应能收敛，而不依赖控制器一直记得某条命令是否完成。</p>
 <p>status 和清理机制帮助表达长期动作进度。但这种幂等收敛不适用于任意业务动作，重复发送通知或提交外部交易需要自己的去重协议。</p>
-<h2 id="gpu-健康与隔离">GPU 健康与隔离<a class="anchor" href="#gpu-健康与隔离" aria-label="链接到本节">#</a></h2>
+<h2 id="18-failure-recovery--gpu-健康与隔离">GPU 健康与隔离<a class="anchor" href="#18-failure-recovery--gpu-健康与隔离" aria-label="链接到本节">#</a></h2>
 <p>持续设备错误时，记录设备 UUID、错误码和受影响运行，再按流程阻止新工作落入该设备或节点。收集诊断后决定维修、重置或替换，验证通过才解除隔离。</p>
 <p>插件上报健康状态是信号之一，平台仍需明确负责人和节点处置。若仅重启容器，新副本可能再次落到同一故障点。</p>
-<h3 id="控制器可以重新创建-pod-不能直接重放业务">控制器可以重新创建 Pod，不能直接重放业务<a class="anchor" href="#控制器可以重新创建-pod-不能直接重放业务" aria-label="链接到本节">#</a></h3>
+<h3 id="18-failure-recovery--控制器可以重新创建-pod-不能直接重放业务">控制器可以重新创建 Pod，不能直接重放业务<a class="anchor" href="#18-failure-recovery--控制器可以重新创建-pod-不能直接重放业务" aria-label="链接到本节">#</a></h3>
 <p>控制器让缺失副本重新存在，不代表之前的读者已收到完整答案，也不代表外部操作尚未发生。恢复组件后，还需要完成请求、计费和工具结果的业务收尾。</p>
 <p>设备恢复也不能以 Running 结束验收。至少确认代表性执行和必要通信正常，再逐步恢复流量，避免坏卡在重启循环中不断消耗新任务。</p>
-<h2 id="runbook-最少包含">Runbook 最少包含<a class="anchor" href="#runbook-最少包含" aria-label="链接到本节">#</a></h2>
+<h2 id="18-failure-recovery--runbook-最少包含">Runbook 最少包含<a class="anchor" href="#18-failure-recovery--runbook-最少包含" aria-label="链接到本节">#</a></h2>
 <p>写清可见症状、分类步骤、现场采集以及安全缓解动作。每个动作标出会中断什么、可能损失多少进度、怎样撤回和何时升级处理。</p>
 <p>例如“停止给一组路由并保留运行日志”与“重建整组并回退保存点”有不同影响，不应混成一句重启建议。演练后更新实际恢复时间与遗漏检查，让手册能被另一位值班人员执行。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">19</div><h1>端到端：设计一个小型 AI 平台</h1></header><div class="prose"><p>将前面的机制合成一份档案馆平台草案。假设有 16 台服务器，每台 4 张同规格 GPU，白天提供问答，夜间进行校对训练。所有容量与目标都是教学设定，尚未在真实集群验收。</p>
-<h2 id="第一步-定义负载">第一步：定义负载<a class="anchor" href="#第一步-定义负载" aria-label="链接到本节">#</a></h2>
+<h2 id="19-platform-design--第一步-定义负载">第一步：定义负载<a class="anchor" href="#19-platform-design--第一步-定义负载" aria-label="链接到本节">#</a></h2>
 <p>交互目录请求输入大多在 1500 token 以内，输出通常不超过 300；长卷宗另走异步入口，避免其延迟目标与交互混用。候选首字目标为 p95 小于 1.2 秒，入口允许有界拒绝。</p>
 <p>训练提供 4、8、16 GPU 三种模板，允许有条件抢占，要求能保存并恢复数据位置。数据与检查点使用远端存储，节点可保留缓存。先确认这些合同，再选择组件。</p>
-<h3 id="六十四张卡-不等于六十四张随时可借的卡">六十四张卡，不等于六十四张随时可借的卡<a class="anchor" href="#六十四张卡-不等于六十四张随时可借的卡" aria-label="链接到本节">#</a></h3>
+<h3 id="19-platform-design--六十四张卡-不等于六十四张随时可借的卡">六十四张卡，不等于六十四张随时可借的卡<a class="anchor" href="#19-platform-design--六十四张卡-不等于六十四张随时可借的卡" aria-label="链接到本节">#</a></h3>
 <p>部分设备必须给在线热容量，维护和故障也要留余量。训练即使可以借用夜间空闲设备，也需要约定白天回收通知、保存时限和不响应时的处理。</p>
 <p>先列受保障池、可借池与隔离池，再统计满足拓扑的可用组。总卡数相同，分散空闲与完整节点空闲对 gang 的意义不同。</p>
-<h2 id="第二步-节点层">第二步：节点层<a class="anchor" href="#第二步-节点层" aria-label="链接到本节">#</a></h2>
+<h2 id="19-platform-design--第二步-节点层">第二步：节点层<a class="anchor" href="#19-platform-design--第二步-节点层" aria-label="链接到本节">#</a></h2>
 <p>固定驱动、运行时、设备插件与监控组合，建立设备和互联标签。验收包括单卡执行、节点内外通信、存储读取以及设备错误上报，不只检查系统能识别卡。</p>
 <p>把模型和数据缓存视为可失去的加速层，远端保留权威来源。缓存失效或节点替换后，平台仍需能重新建立可运行状态。</p>
-<h2 id="第三步-训练队列">第三步：训练队列<a class="anchor" href="#第三步-训练队列" aria-label="链接到本节">#</a></h2>
+<h2 id="19-platform-design--第三步-训练队列">第三步：训练队列<a class="anchor" href="#19-platform-design--第三步-训练队列" aria-label="链接到本节">#</a></h2>
 <p>使用支持作业级准入的调度能力管理组、队列与优先级。三个模板分别约定成员数、每成员设备、网络和 checkpoint 行为，避免用户自行拼接复杂 affinity。</p>
 <p>抢占能力要通过实际保存与恢复演练。平台不能只因为发得出终止信号，就向调度策略声明任务可安全抢占。</p>
-<h2 id="第四步-推理服务">第四步：推理服务<a class="anchor" href="#第四步-推理服务" aria-label="链接到本节">#</a></h2>
+<h2 id="19-platform-design--第四步-推理服务">第四步：推理服务<a class="anchor" href="#19-platform-design--第四步-推理服务" aria-label="链接到本节">#</a></h2>
 <p>先用教学 3B 模型建立单卡基线，确认实际显存余量与延迟，再考虑复制更多副本。每个副本使用合适的缓存和连续批处理，网关施加租户与长度边界。</p>
 <p>若模型装不下才研究必要分片；若单卡已满足容量但总吞吐不足，独立副本可能更直接。不要为使用全部卡数而引入额外协作。</p>
-<h3 id="用两种流量找到第一版副本工作点">用两种流量找到第一版副本工作点<a class="anchor" href="#用两种流量找到第一版副本工作点" aria-label="链接到本节">#</a></h3>
+<h3 id="19-platform-design--用两种流量找到第一版副本工作点">用两种流量找到第一版副本工作点<a class="anchor" href="#19-platform-design--用两种流量找到第一版副本工作点" aria-label="链接到本节">#</a></h3>
 <p>分别重放目录快问和长卷宗输入，逐步提高到达率，记录首字、ITL、有效速率和 KV。以满足相应目标的最高稳定区间作为候选，不拿过载峰值作为承诺。</p>
 <p>再混合两类并注入一个副本退出，观察入口是否有界、剩余副本是否被重试压垮。容量表应说明故障余量，而不是只列正常时均值。</p>
-<h2 id="第五步-扩缩容">第五步：扩缩容<a class="anchor" href="#第五步-扩缩容" aria-label="链接到本节">#</a></h2>
+<h2 id="19-platform-design--第五步-扩缩容">第五步：扩缩容<a class="anchor" href="#19-platform-design--第五步-扩缩容" aria-label="链接到本节">#</a></h2>
 <p>最小热副本承担低流量体验，等待工作和预测流量触发提前准备。模型下载与预热有并发上限，准备中的副本不计入可接流量容量。</p>
 <p>缩容前先退出路由，再排空或到期终止。若夜间要回收设备给训练，必须把排空时间与训练准入窗口一起规划。</p>
-<h2 id="第六步-可观测与成本">第六步：可观测与成本<a class="anchor" href="#第六步-可观测与成本" aria-label="链接到本节">#</a></h2>
+<h2 id="19-platform-design--第六步-可观测与成本">第六步：可观测与成本<a class="anchor" href="#19-platform-design--第六步-可观测与成本" aria-label="链接到本节">#</a></h2>
 <p>每次问答可追溯模型版本、长度、阶段等待和结果类别；训练可追溯数据、代码、mesh 和保存点。细粒度标识进入受控日志，有限维度进入指标。</p>
 <p>定期比较体验达成率、有效交付成本、排队来源与失败回退量。若成本下降来自拒绝更多困难请求，应在同一份结果中显式显示，而非包装成单纯优化。</p>
-<h2 id="用本地实验室算第一版容量">用本地实验室算第一版容量<a class="anchor" href="#用本地实验室算第一版容量" aria-label="链接到本节">#</a></h2>
+<h2 id="19-platform-design--用本地实验室算第一版容量">用本地实验室算第一版容量<a class="anchor" href="#19-platform-design--用本地实验室算第一版容量" aria-label="链接到本节">#</a></h2>
 <pre><code class="language-bash">python3 examples/infra_lab.py memory \
   --parameters 3 --weight-bits 16 \
   --layers 24 --kv-heads 4 --head-dim 96 \
@@ -894,16 +934,16 @@ python3 examples/infra_lab.py check
 </code></pre>
 <p>权重与逻辑 KV 小计约 6.85 GiB，仍需工作区、块浪费和运行时。若该下界已超设备容量，就无需先做昂贵部署；若低于容量，也只是值得继续验证。</p>
 <p>模拟器能检查预算与生命周期，不能给出每副本真实到达率。工作点仍需在目标硬件上用代表性输入实测。</p>
-<h2 id="上线顺序">上线顺序<a class="anchor" href="#上线顺序" aria-label="链接到本节">#</a></h2>
+<h2 id="19-platform-design--上线顺序">上线顺序<a class="anchor" href="#19-platform-design--上线顺序" aria-label="链接到本节">#</a></h2>
 <p>先验证单卡正确性与固定形状，再扩大到真实长度分布。随后增加副本或必要并行，演练保存、故障和排空，再接小流量并逐步开放扩缩容。</p>
 <p>每阶段只改变能解释的因素，保留已知可用配置。若同时换模型、量化、引擎和拓扑，即使结果退化也很难定位责任项。</p>
-<h3 id="最小平台也要演练一条完整失败路径">最小平台也要演练一条完整失败路径<a class="anchor" href="#最小平台也要演练一条完整失败路径" aria-label="链接到本节">#</a></h3>
+<h3 id="19-platform-design--最小平台也要演练一条完整失败路径">最小平台也要演练一条完整失败路径<a class="anchor" href="#19-platform-design--最小平台也要演练一条完整失败路径" aria-label="链接到本节">#</a></h3>
 <p>中断一个训练成员，核对整组退出、完整保存点选择、数据位置恢复以及下一次保存。让一个推理组退出接入，检查旧流结束与新流分配，并测剩余容量是否还能兑现目标。</p>
 <p>记录恢复时间、损失步骤、重复请求与人工动作。这些结果比“已安装高可用组件”更接近平台可恢复性的证据。</p>
-<h2 id="最终架构原则">最终架构原则<a class="anchor" href="#最终架构原则" aria-label="链接到本节">#</a></h2>
+<h2 id="19-platform-design--最终架构原则">最终架构原则<a class="anchor" href="#19-platform-design--最终架构原则" aria-label="链接到本节">#</a></h2>
 <p>采购依据是字节和实测工作点，布局依据是实际通信路径，扩缩依据是可兑现的用户等待。少量模板只要能解释启动、运行、保存和失败，就比大量未经演练的配置更适合作为第一版平台。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">A</div><h1>术语、公式与命令速查</h1></header><div class="prose"><p>遇到陌生缩写时，先确定它描述对象、执行阶段还是资源关系。下面的速查将名称与可观察内容配对，公式同时注明适用边界，便于回到正文复算。</p>
-<h2 id="基础术语">基础术语<a class="anchor" href="#基础术语" aria-label="链接到本节">#</a></h2>
+<h2 id="appendix-glossary--基础术语">基础术语<a class="anchor" href="#appendix-glossary--基础术语" aria-label="链接到本节">#</a></h2>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
@@ -956,10 +996,10 @@ python3 examples/infra_lab.py check
 <td>组内必须匹配参与的数据交换操作</td>
 </tr>
 </tbody></table></div>
-<h2 id="推理术语">推理术语<a class="anchor" href="#推理术语" aria-label="链接到本节">#</a></h2>
+<h2 id="appendix-glossary--推理术语">推理术语<a class="anchor" href="#appendix-glossary--推理术语" aria-label="链接到本节">#</a></h2>
 <p>Prefill 处理已知输入并建立历史，decode 使用历史逐步续写。KV cache 保留各层历史 key/value，分页将其逻辑位置映射到物理块；连续批处理则在轮次间改变被执行的请求集合。这几个术语分别描述计算、状态、分配和调度，不宜互相替代。</p>
 <p>TTFT 关注开始输出之前，ITL 关注相邻输出间隔，TPOT 描述生成阶段的平均口径。前缀命中省去部分已知输入计算；抢占则可能暂时释放资源并在之后重复计算。两者对延迟的影响方向不同。</p>
-<h2 id="并行术语">并行术语<a class="anchor" href="#并行术语" aria-label="链接到本节">#</a></h2>
+<h2 id="appendix-glossary--并行术语">并行术语<a class="anchor" href="#appendix-glossary--并行术语" aria-label="链接到本节">#</a></h2>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
@@ -999,37 +1039,37 @@ python3 examples/infra_lab.py check
 <td>按需组装、梯度归约与保存格式</td>
 </tr>
 </tbody></table></div>
-<h2 id="显存公式">显存公式<a class="anchor" href="#显存公式" aria-label="链接到本节">#</a></h2>
-<h3 id="权重">权重<a class="anchor" href="#权重" aria-label="链接到本节">#</a></h3>
+<h2 id="appendix-glossary--显存公式">显存公式<a class="anchor" href="#appendix-glossary--显存公式" aria-label="链接到本节">#</a></h2>
+<h3 id="appendix-glossary--权重">权重<a class="anchor" href="#appendix-glossary--权重" aria-label="链接到本节">#</a></h3>
 <p><code>参数个数 × 每参数位数 ÷ 8</code> 给内容字节下界。例如 30 亿参数、8 位约为 2.79 GiB，未包含尺度、对齐与未量化部分。</p>
-<h3 id="kv-cache">KV Cache<a class="anchor" href="#kv-cache" aria-label="链接到本节">#</a></h3>
+<h3 id="appendix-glossary--kv-cache">KV Cache<a class="anchor" href="#appendix-glossary--kv-cache" aria-label="链接到本节">#</a></h3>
 <p>常规同配置全注意力模型可用 <code>2 × L × Hkv × D × 元素字节 × 保留位置数</code>。本书的 24 层、4 个 KV head、96 维、2 bytes 得每位置 36 KiB。分页容量、共享与混合架构须另算。</p>
-<h3 id="常见混合精度-adam-教学估算">常见混合精度 Adam 教学估算<a class="anchor" href="#常见混合精度-adam-教学估算" aria-label="链接到本节">#</a></h3>
+<h3 id="appendix-glossary--常见混合精度-adam-教学估算">常见混合精度 Adam 教学估算<a class="anchor" href="#appendix-glossary--常见混合精度-adam-教学估算" aria-label="链接到本节">#</a></h3>
 <p>一种示意配置为每参数 <code>2 + 2 + 4 + 8 = 16 bytes</code>，分别对应低精度参数、梯度、主参数与两份 moment。30 亿参数约 44.70 GiB，不含激活和临时空间；实际以状态 tensor 为准。</p>
-<h3 id="global-batch">Global batch<a class="anchor" href="#global-batch" aria-label="链接到本节">#</a></h3>
+<h3 id="appendix-glossary--global-batch">Global batch<a class="anchor" href="#appendix-glossary--global-batch" aria-label="链接到本节">#</a></h3>
 <p>在简单同步 DP 条件下，<code>每数据副本 micro-batch × DP 度 × 累积次数</code>。3 份样本、4 个副本、5 次累积得到 60 份。TP、PP 不额外贡献独立样本。</p>
-<h3 id="little-39-s-law">Little&#39;s Law<a class="anchor" href="#little-39-s-law" aria-label="链接到本节">#</a></h3>
+<h3 id="appendix-glossary--little-39-s-law">Little&#39;s Law<a class="anchor" href="#appendix-glossary--little-39-s-law" aria-label="链接到本节">#</a></h3>
 <p><code>L = λW</code> 要求平均边界一致，并在适当稳定条件下使用。每秒 6 条进入、平均停留 3 秒，对应平均在内 18 条，不是 p99 或设备需求保证。</p>
-<h2 id="常用检查">常用检查<a class="anchor" href="#常用检查" aria-label="链接到本节">#</a></h2>
-<h3 id="gpu-与拓扑">GPU 与拓扑<a class="anchor" href="#gpu-与拓扑" aria-label="链接到本节">#</a></h3>
+<h2 id="appendix-glossary--常用检查">常用检查<a class="anchor" href="#appendix-glossary--常用检查" aria-label="链接到本节">#</a></h2>
+<h3 id="appendix-glossary--gpu-与拓扑">GPU 与拓扑<a class="anchor" href="#appendix-glossary--gpu-与拓扑" aria-label="链接到本节">#</a></h3>
 <pre><code class="language-bash">nvidia-smi --query-gpu=uuid,name,memory.total,memory.used --format=csv
 nvidia-smi topo -m
 </code></pre>
 <p>前一条确认设备及容量口径，后一条查看邻近关系；两者均不能证明目标模型已通过性能测试。</p>
-<h3 id="kubernetes">Kubernetes<a class="anchor" href="#kubernetes" aria-label="链接到本节">#</a></h3>
+<h3 id="appendix-glossary--kubernetes">Kubernetes<a class="anchor" href="#appendix-glossary--kubernetes" aria-label="链接到本节">#</a></h3>
 <pre><code class="language-bash">kubectl get nodes -o wide
 kubectl describe node GPU_NODE
 kubectl get pods -A -o wide
 kubectl describe pod ARCHIVE_POD
 </code></pre>
 <p>将大写名称替换成实际对象。先看资源与事件，再看容器运行和应用初始化，避免混淆 Pending 与已启动后的设备错误。</p>
-<h3 id="本书离线实验">本书离线实验<a class="anchor" href="#本书离线实验" aria-label="链接到本节">#</a></h3>
+<h3 id="appendix-glossary--本书离线实验">本书离线实验<a class="anchor" href="#appendix-glossary--本书离线实验" aria-label="链接到本节">#</a></h3>
 <pre><code class="language-bash">python3 examples/infra_lab.py memory --parameters 3 --context 6144
 python3 examples/infra_lab.py simulate
 python3 examples/infra_lab.py check
 </code></pre>
 <p>最后一条运行公式、分页、调度和无进展条件的离线断言，不会调用 GPU 或云服务。</p>
-<h2 id="症状速查">症状速查<a class="anchor" href="#症状速查" aria-label="链接到本节">#</a></h2>
+<h2 id="appendix-glossary--症状速查">症状速查<a class="anchor" href="#appendix-glossary--症状速查" aria-label="链接到本节">#</a></h2>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
 <tr>
@@ -1078,10 +1118,10 @@ python3 examples/infra_lab.py check
 <td>已提交状态、配置兼容与数据游标</td>
 </tr>
 </tbody></table></div>
-</div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">B</div><h1>源码地图、来源与版本说明</h1></header><div class="prose"><h2 id="机制-算例与实测分别说明什么">机制、算例与实测分别说明什么<a class="anchor" href="#机制-算例与实测分别说明什么" aria-label="链接到本节">#</a></h2>
+</div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">B</div><h1>源码地图、来源与版本说明</h1></header><div class="prose"><h2 id="appendix-sources--机制-算例与实测分别说明什么">机制、算例与实测分别说明什么<a class="anchor" href="#appendix-sources--机制-算例与实测分别说明什么" aria-label="链接到本节">#</a></h2>
 <p>阅读代码可以核对职责与可达路径，论文可解释设计与复杂度，手算可发现数量和单位错误，离线程序可检验它明确实现的规则。它们不能替代目标 GPU、互联和线上流量的实测。</p>
 <p>新版正文采用档案馆问答与校对训练作为虚构背景。模型尺寸、时间线和硬件上限均为教学假设；未声称这些配置在真实平台达到相应服务目标。迁移时应重新验证精度、执行实现、负载和恢复条件。</p>
-<h2 id="本地源码快照">本地源码快照<a class="anchor" href="#本地源码快照" aria-label="链接到本节">#</a></h2>
+<h2 id="appendix-sources--本地源码快照">本地源码快照<a class="anchor" href="#appendix-sources--本地源码快照" aria-label="链接到本节">#</a></h2>
 <p>本书沿用已归档的 2026-09-22 快照作为事实依据，重写日期不意味着第三方源码已更新。</p>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
@@ -1120,11 +1160,11 @@ python3 examples/infra_lab.py check
 </tr>
 </tbody></table></div>
 <p>完整定位信息保存在 <code>sources/inventory.json</code>。本地副本用于溯源，第三方许可证及版权仍归各项目；正文重写不改变这些事实材料。</p>
-<h2 id="官方材料">官方材料<a class="anchor" href="#官方材料" aria-label="链接到本节">#</a></h2>
+<h2 id="appendix-sources--官方材料">官方材料<a class="anchor" href="#appendix-sources--官方材料" aria-label="链接到本节">#</a></h2>
 <p><code>sources/web/sources.tsv</code> 记录归档 URL，<code>sources/web/</code> 中的 Markdown 保存当时材料。核对在线文档时注意它可能已经超出本书版本。</p>
 <p>推理部分主要借助 vLLM 的架构、分页、调优及分布式服务说明；训练与设备行为结合 PyTorch 的分布式、CUDA、FSDP2 和检查点文档，以及 TorchTitan 官方资料。硬件与通信参考 NVIDIA 的性能、CUDA 最佳实践和 NCCL 文档。</p>
 <p>集群部分使用 Kubernetes GPU 调度、NVIDIA 插件、Volcano 和 KubeRay 官方说明。Hugging Face 的内存与训练性能资料作为补充解释，具体实现仍回到目标框架核对。</p>
-<h2 id="论文">论文<a class="anchor" href="#论文" aria-label="链接到本节">#</a></h2>
+<h2 id="appendix-sources--论文">论文<a class="anchor" href="#appendix-sources--论文" aria-label="链接到本节">#</a></h2>
 <p>下列文献标识保留为可核对的来源，正文图解全部重新设计，不复刻其原始图表：</p>
 <div class="table-wrap" tabindex="0"><table>
 <thead>
@@ -1155,19 +1195,19 @@ python3 examples/infra_lab.py check
 </tr>
 </tbody></table></div>
 <p>实验图中的设备、模型和测量环境属于对应论文，不应移作本书虚构配置的性能证据。</p>
-<h2 id="建议的源码阅读顺序">建议的源码阅读顺序<a class="anchor" href="#建议的源码阅读顺序" aria-label="链接到本节">#</a></h2>
-<h3 id="vllm-请求执行">vLLM 请求执行<a class="anchor" href="#vllm-请求执行" aria-label="链接到本节">#</a></h3>
+<h2 id="appendix-sources--建议的源码阅读顺序">建议的源码阅读顺序<a class="anchor" href="#appendix-sources--建议的源码阅读顺序" aria-label="链接到本节">#</a></h2>
+<h3 id="appendix-sources--vllm-请求执行">vLLM 请求执行<a class="anchor" href="#appendix-sources--vllm-请求执行" aria-label="链接到本节">#</a></h3>
 <p>从 <code>entrypoints/openai</code> 找请求如何成为引擎输入，沿 <code>v1/engine/llm_engine.py</code>、<code>v1/engine/core.py</code> 到调度器。随后检查 <code>v1/core/kv_cache_manager.py</code> 的资源行为，以及 <code>v1/worker/gpu_model_runner.py</code> 怎样消费调度结果。</p>
 <p>带一条会等待、推进并最终取消的请求，记录它跨边界时哪些字段发生变化，再深入模型实现。</p>
-<h3 id="torchtitan-训练">TorchTitan 训练<a class="anchor" href="#torchtitan-训练" aria-label="链接到本节">#</a></h3>
+<h3 id="appendix-sources--torchtitan-训练">TorchTitan 训练<a class="anchor" href="#appendix-sources--torchtitan-训练" aria-label="链接到本节">#</a></h3>
 <p>以 <code>train.py</code> 或对应训练引擎定位更新边界，接着查数据组件、并行维度、模型 parallelize、优化器和 checkpointer。每个模块都标注在当前步骤的什么时候运行，哪些状态会跨步延续。</p>
-<h3 id="megatron-多维并行">Megatron 多维并行<a class="anchor" href="#megatron-多维并行" aria-label="链接到本节">#</a></h3>
+<h3 id="appendix-sources--megatron-多维并行">Megatron 多维并行<a class="anchor" href="#appendix-sources--megatron-多维并行" aria-label="链接到本节">#</a></h3>
 <p>先画 <code>parallel_state.py</code> 形成的组，再读 <code>tensor_parallel</code> 和 <code>pipeline_parallel</code> 的数据映射。模型配置可在 <code>transformer/transformer_config.py</code> 核对，分布式状态相关实现再进入 <code>distributed</code>。</p>
-<h3 id="nccl">NCCL<a class="anchor" href="#nccl" aria-label="链接到本节">#</a></h3>
+<h3 id="appendix-sources--nccl">NCCL<a class="anchor" href="#appendix-sources--nccl" aria-label="链接到本节">#</a></h3>
 <p>先理解公共操作的输入输出合同，再跟随 enqueue、拓扑规划和 transport。只有需要分析具体设备执行时才深入 device 代码，否则容易丢掉“谁需要从谁得到什么”的原始问题。</p>
-<h3 id="kubernetes-gpu">Kubernetes GPU<a class="anchor" href="#kubernetes-gpu" aria-label="链接到本节">#</a></h3>
+<h3 id="appendix-sources--kubernetes-gpu">Kubernetes GPU<a class="anchor" href="#appendix-sources--kubernetes-gpu" aria-label="链接到本节">#</a></h3>
 <p>沿 <code>cmd/nvidia-device-plugin</code> 到 <code>internal/plugin</code> 与资源发现模块，区分发现、注册和 Allocate。另用 kubelet 与调度器职责补全节点选择过程，避免把插件误读为集群调度器。</p>
-<h2 id="原创性与限制">原创性与限制<a class="anchor" href="#原创性与限制" aria-label="链接到本节">#</a></h2>
+<h2 id="appendix-sources--原创性与限制">原创性与限制<a class="anchor" href="#appendix-sources--原创性与限制" aria-label="链接到本节">#</a></h2>
 <p>本次保留章与节的结构，重新撰写说明、手算、教学代码和图形表达。真实 API、路径、论文标识和提交值作为事实引用保留，未修改归档第三方源码。</p>
 <p>容量公式刻画明确假设下的下界或量级；离线模拟没有真实 kernel、采样质量或网络时间。上线和采购都需要目标环境的正确性、峰值、性能与故障恢复证据，不能将这份教材当作配置保证书。</p>
 </div></section></article></main><dialog class="menu-panel" data-menu-panel><div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div><nav class="menu-list"><a href="chapters/00-preface.html"><span>00</span>读前说明：不懂 CUDA 也能开始</a><a href="chapters/01-request-journey.html"><span>01</span>一条请求穿过哪些系统</a><a href="chapters/02-model-basics.html"><span>02</span>最少模型知识：token、tensor 与参数</a><a href="chapters/03-gpu-basics.html"><span>03</span>GPU 不是更快的 CPU</a><a href="chapters/04-memory-accounting.html"><span>04</span>显存账本：模型到底占多少</a><a href="chapters/05-prefill-decode.html"><span>05</span>推理的两幕：Prefill 与 Decode</a><a href="chapters/06-kv-cache.html"><span>06</span>KV Cache：上下文为什么越来越贵</a><a href="chapters/07-continuous-batching.html"><span>07</span>连续批处理：GPU 如何同时服务很多人</a><a href="chapters/08-loading-quantization.html"><span>08</span>模型加载、精度与量化</a><a href="chapters/09-parallelism.html"><span>09</span>多卡不是一个开关</a><a href="chapters/10-collectives.html"><span>10</span>Collective：GPU 之间怎样交换数据</a><a href="chapters/11-training-loop.html"><span>11</span>训练循环与训练显存</a><a href="chapters/12-distributed-training.html"><span>12</span>分片、重计算与并行组合</a><a href="chapters/13-data-checkpoint.html"><span>13</span>数据管道与 Checkpoint</a><a href="chapters/14-kubernetes-gpu.html"><span>14</span>Kubernetes 怎样看到 GPU</a><a href="chapters/15-batch-scheduling.html"><span>15</span>批作业调度：为什么要一起开跑</a><a href="chapters/16-serving-cluster.html"><span>16</span>在线服务：网关、队列、副本与扩缩容</a><a href="chapters/17-observability.html"><span>17</span>可观测性、SLO 与成本</a><a href="chapters/18-failure-recovery.html"><span>18</span>故障恢复：把失败当作正常路径</a><a href="chapters/19-platform-design.html"><span>19</span>端到端：设计一个小型 AI 平台</a><a href="chapters/appendix-glossary.html"><span>A</span>术语、公式与命令速查</a><a href="chapters/appendix-sources.html"><span>B</span>源码地图、来源与版本说明</a></nav></dialog><footer class="site-footer">正文、图解与实验全新编写 · 事实快照沿用 2026-09-22</footer><script src="assets/reader.js"></script></body></html>

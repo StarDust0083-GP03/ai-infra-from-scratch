@@ -25,7 +25,7 @@ const items = [...chapterMatches, ...appendixMatches].map((m, i) => ({
 if (items.length !== 22) throw new Error(`Expected 22 chapters, found ${items.length}`);
 
 const escapeHtml = (s) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const plain = (md) => md.replace(/\{\{diagram:[^}]+\}\}/g, ' ').replace(/```[\s\S]*?```/g, ' ')
+const plain = (md) => md.replace(/<figure[\s\S]*?<\/figure>/g, ' ').replace(/\{\{diagram:[^}]+\}\}/g, ' ').replace(/```[\s\S]*?```/g, ' ')
   .replace(/`([^`]+)`/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
   .replace(/^#{1,6}\s+/gm, '').replace(/[>*_|]/g, ' ').replace(/\s+/g, ' ').trim();
 const slugify = (s) => s.replace(/<[^>]+>/g, '').trim().toLowerCase()
@@ -74,7 +74,7 @@ for (let i=0;i<records.length;i++) {
 const descriptions={
 '00-preface':'阅读路线、范围与验证方法','01-request-journey':'从 HTTP 到 GPU kernel 的完整路径','02-model-basics':'只学容量规划需要的模型知识','03-gpu-basics':'计算、带宽、显存与 Roofline','04-memory-accounting':'权重、KV、激活与训练状态','05-prefill-decode':'TTFT 与逐 token 生成','06-kv-cache':'分页 block、容量和前缀复用','07-continuous-batching':'iteration 级动态调度','08-loading-quantization':'冷启动、精度与低比特权重','09-parallelism':'DP、TP、PP、CP 与 EP','10-collectives':'AllReduce 到 AllToAll','11-training-loop':'Forward、Backward 与 Optimizer','12-distributed-training':'FSDP、ZeRO 与 3D 并行','13-data-checkpoint':'数据背压、分片保存与恢复','14-kubernetes-gpu':'Device Plugin、MIG 与资源合同','15-batch-scheduling':'Gang、队列、公平与拓扑','16-serving-cluster':'路由、副本、冷启动与扩缩容','17-observability':'TTFT、TPOT、SLO 与成本','18-failure-recovery':'首错、重试、隔离与调和','19-platform-design':'从需求到小型 AI 平台','appendix-glossary':'术语、公式、命令与故障速查','appendix-sources':'七个仓库与官方材料地图'};
 const rows=records.map(r=>`<a class="chapter-row" href="${r.href}"><span class="chapter-no">${r.label}</span><span><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(descriptions[r.slug]||'')}</p></span><span class="arrow">→</span></a>`).join('');
-const home=`<main id="main"><section class="hero"><div><p class="kicker">A visual field guide for beginners</p><h1>从一张 GPU<br><em>到生产集群</em></h1><p class="dek">为档案馆搭建问答与校对平台：计算每份状态的空间，定位每一段等待，再验证跨卡、调度和恢复的边界。</p></div><aside class="hero-aside"><strong>零硬件也能学</strong>15 张重绘图解与离线实验，以明确的输入核算容量、分页和调度，不将教学轮次冒充硬件性能。<dl class="snapshot"><dt>SOURCE</dt><dd>7 official repos</dd><dt>GUIDES</dt><dd>25 official docs / papers</dd><dt>DATE</dt><dd>2026-09-22</dd></dl></aside></section><section class="home-grid"><aside class="home-intro"><h2>20 章 + 2 附录</h2><p>章节层级保持不变，讲解、图形与案例全部重写。以单卡算例起步，逐步进入通信、作业与服务治理。</p><a href="chapters/00-preface.html">从第 0 章开始 →</a><br><a href="search.html">全文搜索 →</a></aside><div class="contents">${rows}</div></section></main>`;
+const home=`<main id="main"><section class="hero"><div><p class="kicker">A visual field guide for beginners</p><h1>从一张 GPU<br><em>到生产集群</em></h1><p class="dek">为档案馆搭建问答与校对平台：计算每份状态的空间，定位每一段等待，再验证跨卡、调度和恢复的边界。</p></div><aside class="hero-aside"><strong>零硬件也能学</strong>19 张图解与离线实验，以明确的输入核算容量、分页和调度，不将教学轮次冒充硬件性能。<dl class="snapshot"><dt>SOURCE</dt><dd>7 official repos</dd><dt>GUIDES</dt><dd>25 official docs / papers</dd><dt>DATE</dt><dd>2026-09-22</dd></dl></aside></section><section class="home-grid"><aside class="home-intro"><h2>20 章 + 2 附录</h2><p>章节层级保持不变，讲解、图形与案例全部重写。以单卡算例起步，逐步进入通信、作业与服务治理。</p><a href="chapters/00-preface.html">从第 0 章开始 →</a><br><a href="search.html">全文搜索 →</a></aside><div class="contents">${rows}</div></section></main>`;
 fs.writeFileSync(path.join(here,'index.html'),shell({title:'目录',body:home}));
 
 const searchIndex=records.map(r=>({number:r.label,title:r.title,href:r.href,text:r.text}));
@@ -82,6 +82,14 @@ fs.writeFileSync(path.join(assetsDir,'search-index.json'),JSON.stringify(searchI
 fs.writeFileSync(path.join(assetsDir,'search-index.js'),`window.BOOK_SEARCH=${JSON.stringify(searchIndex)};\n`);
 const search=`<main id="main" class="search-page"><p class="kicker">Full text index</p><h1>从一个指标，<br>找到整条数据路径。</h1><label for="search" class="skip">搜索全书</label><input id="search" class="search-input" type="search" autocomplete="off" placeholder="KV Cache / NCCL / OOM"><section id="results" aria-live="polite"><p class="search-hint">输入概念、指标或故障，例如 TTFT、显存、AllReduce。</p></section></main>`;
 fs.writeFileSync(path.join(here,'search.html'),shell({title:'搜索',body:search,extraScripts:'<script src="assets/search-index.js"></script><script src="assets/search.js"></script>'}));
-const combined=records.map(r=>`<section class="book-section"><header class="chapter-head"><div class="chapter-number">${r.label}</div><h1>${escapeHtml(r.title)}</h1></header><div class="prose">${r.html}</div></section>`).join('');
+// A chapter fragment needs its own ID namespace in the combined volume.
+function volumeHtml(record) {
+  const prefix = record.slug + '--';
+  return record.html.replace(/\bid="([^"]+)"/g, (_, id) => `id="${prefix}${id}"`)
+    .replace(/href="#([^"]+)"/g, (_, id) => `href="#${prefix}${id}"`)
+    .replace(/aria-labelledby="([^"]+)"/g, (_, ids) =>
+      `aria-labelledby="${ids.split(/\s+/).map(id => prefix + id).join(' ')}"`);
+}
+const combined=records.map(r=>`<section class="book-section"><header class="chapter-head"><div class="chapter-number">${r.label}</div><h1>${escapeHtml(r.title)}</h1></header><div class="prose">${volumeHtml(r)}</div></section>`).join('');
 fs.writeFileSync(path.join(here,'book.html'),shell({title:'离线合订本',body:`<main id="main" class="reader-layout"><div></div><article class="chapter">${combined}</article></main>`,chapter:true}));
-console.log(`Built ${records.length} chapters, 15 diagrams, index, search, and book.html`);
+console.log(`Built ${records.length} chapters, 19 diagrams, index, search, and book.html`);

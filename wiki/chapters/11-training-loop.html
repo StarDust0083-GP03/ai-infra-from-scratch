@@ -21,6 +21,16 @@
 <h3 id="一次-optimizer-step-究竟看过多少样本">一次 optimizer step 究竟看过多少样本<a class="anchor" href="#一次-optimizer-step-究竟看过多少样本" aria-label="链接到本节">#</a></h3>
 <p>设每个数据副本一次处理 3 份校对样本，共 4 个副本，累积 5 次，则更新前共处理 60 份样本。若每份恰好含 1024 个有效位置，对应 61,440 个有效 token。</p>
 <p>每个 micro-step 都清梯度并更新，会变成五次不同更新，不再等价于这个 global batch。实际变长数据还应按有效 token 而非固定样本长度复核。</p>
+<figure class="diagram" tabindex="0" data-review-figure="infra-accumulation">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 396" role="img" aria-labelledby="infra-accumulation-title infra-accumulation-desc" style="display:block;width:100%;min-width:620px;height:auto">
+<title id="infra-accumulation-title">5 次累积，只做 1 次参数更新</title>
+<desc id="infra-accumulation-desc">每个 micro-step：每数据副本 3 个样本 × 4 副本 = 12；累积 5 次：12 × 5 = 60 个样本，梯度持续保留；一次 optimizer step：固定 1024 有效位置时共 61,440 token。示例为简单同步数据并行；TP、PP 不再乘入独立样本数。</desc>
+<rect width="960" height="396" fill="var(--paper,#faf8f1)"/>
+<g font-family="'IBM Plex Sans','Noto Sans CJK SC',system-ui,sans-serif"><text x="40" y="48" font-size="28" fill="var(--ink,#243b48)" text-anchor="start">5 次累积，只做 1 次参数更新</text><path d="M176 144 L176 164" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 157 L176 164 L181 157" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="88" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">每个 micro-step</text><text x="344" y="123" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">每数据副本 3 个样本 × 4 副本 = 12</text><path d="M176 224 L176 244" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><path d="M171 237 L176 244 L181 237" fill="none" stroke="var(--muted,#536772)" stroke-width="2"/><rect x="40" y="168" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#ffffff))" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="56" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">累积 5 次</text><text x="344" y="203" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">12 × 5 = 60 个样本，梯度持续保留</text><rect x="40" y="248" width="272" height="56" rx="6" fill="var(--paper-2,var(--paper-deep,#e5ede9))" stroke="var(--forest,var(--accent,#29564c))"/><text x="56" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">一次 optimizer step</text><text x="344" y="283" font-size="20" fill="var(--ink,#243b48)" text-anchor="start">固定 1024 有效位置时共 61,440 token</text><path d="M40 332H920" stroke="var(--line,var(--rule,#bfc8c3))"/><text x="40" y="368" font-size="18" fill="var(--muted,#536772)" text-anchor="start">示例为简单同步数据并行；TP、PP 不再乘入独立样本数。</text></g>
+</svg>
+<figcaption>图：示例为简单同步数据并行；TP、PP 不再乘入独立样本数。</figcaption>
+</figure>
+
 <h2 id="训练显存四大项">训练显存四大项<a class="anchor" href="#训练显存四大项" aria-label="链接到本节">#</a></h2>
 <p>参数决定模型当前值，梯度记录本轮更新方向，优化器状态记录更新历史，激活支持本轮求导。前几项大体跟参数量相关，激活更直接依赖 micro-batch、序列形状及实现。</p>
 <p>长期状态主导时考虑分片，激活主导时考虑缩小输入或重算。最好通过测量和对象清点确认主项，而不是根据模型标签预判。</p>
