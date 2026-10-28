@@ -1,18 +1,18 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>训练循环与训练显存 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 11</div><div class="rail-title">训练循环与训练显存</div><ol><li><a href="#forward">Forward</a></li><li><a href="#backward">Backward</a></li><li><a href="#optimizer-step">Optimizer Step</a></li><li><a href="#micro-batch-global-batch-与累积">Micro-batch、Global batch 与累积</a></li><li><a href="#训练显存四大项">训练显存四大项</a></li><li><a href="#activation-checkpointing">Activation Checkpointing</a></li><li><a href="#mixed-precision">Mixed Precision</a></li><li><a href="#torchtitan-的训练骨架">TorchTitan 的训练骨架</a></li><li><a href="#训练吞吐看什么">训练吞吐看什么</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 11 章</div><h1>训练循环与训练显存</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>夜间校对任务用人工修订的档案片段训练模型。一次参数更新要经过取样、前向计算、反向求导和优化器更新。把这些动作的边界画清楚，才能区分数据等待、激活峰值和状态占用。</p>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 11</div><div class="rail-title">训练循环与训练显存</div><ol><li><a href="#前向-forward">前向（Forward）</a></li><li><a href="#反向-backward">反向（Backward）</a></li><li><a href="#优化器更新-optimizer-step">优化器更新（Optimizer Step）</a></li><li><a href="#micro-batch-global-batch-与累积">Micro-batch、Global batch 与累积</a></li><li><a href="#训练显存四大项">训练显存四大项</a></li><li><a href="#激活重算-activation-checkpointing">激活重算（Activation Checkpointing）</a></li><li><a href="#混合精度-mixed-precision">混合精度（Mixed Precision）</a></li><li><a href="#torchtitan-的训练骨架">TorchTitan 的训练骨架</a></li><li><a href="#训练吞吐看什么">训练吞吐看什么</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 11 章</div><h1>训练循环与训练显存</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 10 分钟</div></header><div class="prose"><p>夜间校对任务用人工修订的档案片段训练模型。一次参数更新要经过取样、前向计算、反向求导和优化器更新。把这些动作的边界画清楚，才能区分数据等待、激活峰值和状态占用。</p>
 <p>下面是说明累积顺序的伪代码，不是可直接运行的训练器：</p>
 <pre><code class="language-text">清空本轮梯度
 重复 K 次：取 micro-batch，计算并缩放 loss，累积梯度
 按分布式策略完成需要的梯度同步
 检查数值状态，执行一次参数更新
 </code></pre>
-<h2 id="forward">Forward<a class="anchor" href="#forward" aria-label="链接到本节">#</a></h2>
+<h2 id="前向-forward">前向（Forward）<a class="anchor" href="#前向-forward" aria-label="链接到本节">#</a></h2>
 <p>模型将输入位置转换为预测分布，并根据目标计算 loss。自动微分需要某些中间结果，因此 forward 结束后并非只留下一个 loss 数值。哪些结果保存、哪些可重算，决定后续激活内存。</p>
 <p>样本掩码、padding 和目标移动也影响训练语义。一个更快但读错目标的 forward 不能算性能优化。</p>
-<h2 id="backward">Backward<a class="anchor" href="#backward" aria-label="链接到本节">#</a></h2>
+<h2 id="反向-backward">反向（Backward）<a class="anchor" href="#反向-backward" aria-label="链接到本节">#</a></h2>
 <p>自动微分沿依赖关系计算梯度，读取保存结果或重新计算部分区域。分布式方案还可能在梯度就绪后逐批启动同步，而非等全部反向结束才开始通信。</p>
 <p>观察到反向阶段很长时，要区分本地求导、重计算和同步等待。不同原因对应不同动作，不能全部归到“反向约为前向两倍”的粗略经验。</p>
-<h2 id="optimizer-step">Optimizer Step<a class="anchor" href="#optimizer-step" aria-label="链接到本节">#</a></h2>
+<h2 id="优化器更新-optimizer-step">优化器更新（Optimizer Step）<a class="anchor" href="#优化器更新-optimizer-step" aria-label="链接到本节">#</a></h2>
 <p>以 AdamW 为例，更新需要参数、梯度及 moment，还可能有高精度主参数。更新边界通常也推动学习率计划和步数计数。若数值异常导致跳过更新，要明确这些计数怎样处理。</p>
 <p>只保存模型权重可以用于某些推理场景，却不足以在同一优化状态继续训练。恢复需要的内容将在数据与检查点章节展开。</p>
 <h2 id="micro-batch-global-batch-与累积">Micro-batch、Global batch 与累积<a class="anchor" href="#micro-batch-global-batch-与累积" aria-label="链接到本节">#</a></h2>
@@ -34,13 +34,13 @@
 <h2 id="训练显存四大项">训练显存四大项<a class="anchor" href="#训练显存四大项" aria-label="链接到本节">#</a></h2>
 <p>参数决定模型当前值，梯度记录本轮更新方向，优化器状态记录更新历史，激活支持本轮求导。前几项大体跟参数量相关，激活更直接依赖 micro-batch、序列形状及实现。</p>
 <p>长期状态主导时考虑分片，激活主导时考虑缩小输入或重算。最好通过测量和对象清点确认主项，而不是根据模型标签预判。</p>
-<h2 id="activation-checkpointing">Activation Checkpointing<a class="anchor" href="#activation-checkpointing" aria-label="链接到本节">#</a></h2>
+<h2 id="激活重算-activation-checkpointing">激活重算（Activation Checkpointing）<a class="anchor" href="#激活重算-activation-checkpointing" aria-label="链接到本节">#</a></h2>
 <p>选择边界保存少量结果，其余中间状态在反向需要时重新计算。它以额外运算换取更小保存集合，边界和分组粒度决定收益及成本。</p>
 <p>采用后需比较峰值与完整 step 时间，还要确认随机性和数值路径按框架要求处理。某些区域计算昂贵却节省有限，不适合一概开启最大力度重算。</p>
 <h3 id="重计算省下的是激活-而不是所有训练状态">重计算省下的是激活，而不是所有训练状态<a class="anchor" href="#重计算省下的是激活-而不是所有训练状态" aria-label="链接到本节">#</a></h3>
 <p>若本轮激活峰值为 8 GiB，而参数、梯度和优化器状态共 40 GiB，即使去掉大部分激活，40 GiB 仍然存在。这个教学账解释了为什么重算不能修复所有训练 OOM。</p>
 <p>应优先分析占用大、重新生成成本相对低的中间结果。重算区域扩大后，还需复查数据供给和通信重叠是否改变了关键路径。</p>
-<h2 id="mixed-precision">Mixed Precision<a class="anchor" href="#mixed-precision" aria-label="链接到本节">#</a></h2>
+<h2 id="混合精度-mixed-precision">混合精度（Mixed Precision）<a class="anchor" href="#混合精度-mixed-precision" aria-label="链接到本节">#</a></h2>
 <p>计算、累加、梯度和优化器可以采用不同精度。FP16 可能需要 loss scaling，BF16 具有不同指数范围和尾数精度，FP8 又依赖硬件及缩放方案。没有一条“全部转低精度”的规则适用于所有训练。</p>
 <p>记录溢出、跳步、梯度范数和 loss，检查速度变化是否伴随训练不稳定。字节数下降只是其中一项结果。</p>
 <h2 id="torchtitan-的训练骨架">TorchTitan 的训练骨架<a class="anchor" href="#torchtitan-的训练骨架" aria-label="链接到本节">#</a></h2>

@@ -99,13 +99,13 @@
 <h2 id="显存公式">显存公式<a class="anchor" href="#显存公式" aria-label="链接到本节">#</a></h2>
 <h3 id="权重">权重<a class="anchor" href="#权重" aria-label="链接到本节">#</a></h3>
 <p><code>参数个数 × 每参数位数 ÷ 8</code> 给内容字节下界。例如 30 亿参数、8 位约为 2.79 GiB，未包含尺度、对齐与未量化部分。</p>
-<h3 id="kv-cache">KV Cache<a class="anchor" href="#kv-cache" aria-label="链接到本节">#</a></h3>
+<h3 id="kv-cache-键值缓存">KV Cache（键值缓存）<a class="anchor" href="#kv-cache-键值缓存" aria-label="链接到本节">#</a></h3>
 <p>常规同配置全注意力模型可用 <code>2 × L × Hkv × D × 元素字节 × 保留位置数</code>。本书的 24 层、4 个 KV head、96 维、2 bytes 得每位置 36 KiB。分页容量、共享与混合架构须另算。</p>
 <h3 id="常见混合精度-adam-教学估算">常见混合精度 Adam 教学估算<a class="anchor" href="#常见混合精度-adam-教学估算" aria-label="链接到本节">#</a></h3>
 <p>一种示意配置为每参数 <code>2 + 2 + 4 + 8 = 16 bytes</code>，分别对应低精度参数、梯度、主参数与两份 moment。30 亿参数约 44.70 GiB，不含激活和临时空间；实际以状态 tensor 为准。</p>
-<h3 id="global-batch">Global batch<a class="anchor" href="#global-batch" aria-label="链接到本节">#</a></h3>
+<h3 id="全局-batch">全局 batch<a class="anchor" href="#全局-batch" aria-label="链接到本节">#</a></h3>
 <p>在简单同步 DP 条件下，<code>每数据副本 micro-batch × DP 度 × 累积次数</code>。3 份样本、4 个副本、5 次累积得到 60 份。TP、PP 不额外贡献独立样本。</p>
-<h3 id="little-39-s-law">Little&#39;s Law<a class="anchor" href="#little-39-s-law" aria-label="链接到本节">#</a></h3>
+<h3 id="little-定律">Little 定律<a class="anchor" href="#little-定律" aria-label="链接到本节">#</a></h3>
 <p><code>L = λW</code> 要求平均边界一致，并在适当稳定条件下使用。每秒 6 条进入、平均停留 3 秒，对应平均在内 18 条，不是 p99 或设备需求保证。</p>
 <h2 id="常用检查">常用检查<a class="anchor" href="#常用检查" aria-label="链接到本节">#</a></h2>
 <h3 id="gpu-与拓扑">GPU 与拓扑<a class="anchor" href="#gpu-与拓扑" aria-label="链接到本节">#</a></h3>

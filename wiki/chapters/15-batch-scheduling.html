@@ -1,9 +1,9 @@
 <!doctype html><html lang="zh-CN" data-theme="auto"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="面向初学者的 AI Infra 源码导读"><title>批作业调度：为什么要一起开跑 · AI Infra from Scratch</title><link rel="stylesheet" href="../assets/reader.css"></head><body data-chapter="true"><div class="progress" aria-hidden="true"></div><a class="skip" href="#main">跳到正文</a>
-<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 15</div><div class="rail-title">批作业调度：为什么要一起开跑</div><ol><li><a href="#普通逐-pod-调度的问题">普通逐 Pod 调度的问题</a></li><li><a href="#gang-scheduling">Gang Scheduling</a></li><li><a href="#volcano-的基本对象">Volcano 的基本对象</a></li><li><a href="#队列-公平与利用率">队列、公平与利用率</a></li><li><a href="#backfill">Backfill</a></li><li><a href="#抢占不是-kill-9-就结束">抢占不是 kill -9 就结束</a></li><li><a href="#拓扑约束">拓扑约束</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 15 章</div><h1>批作业调度：为什么要一起开跑</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>夜间训练需要多个进程协作。如果只给其中部分进程设备，它们可能一直等待其他成员，已经分到的卡却无法交付任何训练结果。作业级准入要避免这种半组占用。</p>
+<header class="topbar"><a class="brand" href="../index.html"><span class="brand-mark">GPU</span><span>AI Infra from Scratch</span></a><nav class="tools" aria-label="阅读工具"><a class="tool-button" href="../search.html" aria-label="搜索">搜索</a><button class="tool-button" data-font-down aria-label="减小字号">A−</button><button class="tool-button" data-font-up aria-label="增大字号">A+</button><button class="tool-button" data-theme>深色</button><button class="tool-button" data-menu-open aria-label="打开目录">目录</button></nav></header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 15</div><div class="rail-title">批作业调度：为什么要一起开跑</div><ol><li><a href="#普通逐-pod-调度的问题">普通逐 Pod 调度的问题</a></li><li><a href="#整组准入-gang-scheduling">整组准入（Gang Scheduling）</a></li><li><a href="#volcano-的基本对象">Volcano 的基本对象</a></li><li><a href="#队列-公平与利用率">队列、公平与利用率</a></li><li><a href="#回填-backfill">回填（Backfill）</a></li><li><a href="#抢占不是-kill-9-就结束">抢占不是 kill -9 就结束</a></li><li><a href="#拓扑约束">拓扑约束</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 15 章</div><h1>批作业调度：为什么要一起开跑</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 8 分钟</div></header><div class="prose"><p>夜间训练需要多个进程协作。如果只给其中部分进程设备，它们可能一直等待其他成员，已经分到的卡却无法交付任何训练结果。作业级准入要避免这种半组占用。</p>
 <h2 id="普通逐-pod-调度的问题">普通逐 Pod 调度的问题<a class="anchor" href="#普通逐-pod-调度的问题" aria-label="链接到本节">#</a></h2>
 <p>考虑两个作业，各要求三个协作 Pod，而当前只能容纳四个。若各启动两个，就出现两组都缺最后成员、却没有剩余槽位的状态。单个 Pod 看起来分配成功，作业整体没有前进。</p>
 <p>平台需要根据真实协作下界判断是否准入，再安排成员，而非仅优化每个独立 Pod 的放置成功率。</p>
-<h2 id="gang-scheduling">Gang Scheduling<a class="anchor" href="#gang-scheduling" aria-label="链接到本节">#</a></h2>
+<h2 id="整组准入-gang-scheduling">整组准入（Gang Scheduling）<a class="anchor" href="#整组准入-gang-scheduling" aria-label="链接到本节">#</a></h2>
 <p>gang 策略将最小成员或资源需求作为启动条件。不满足时等待，满足时让必要成员获得资源。这能减少无效半启动，却可能为大组保留资源并产生暂时空闲。</p>
 <p>准入条件应来自运行时合同，例如必须同时存在的训练 worker 数，而不是把日志收集或辅助容器也机械计入计算门槛。</p>
 <h3 id="一起获得资源-不等于同一瞬间开始计算">一起获得资源，不等于同一瞬间开始计算<a class="anchor" href="#一起获得资源-不等于同一瞬间开始计算" aria-label="链接到本节">#</a></h3>
@@ -23,15 +23,15 @@
 <p>Job 描述任务角色与生命周期，PodGroup 描述需要协同的成员，Queue 表达资源组织和策略范围，调度插件实现 gang、公平、优先级或装箱等规则，控制器负责把期望转换成实际对象。</p>
 <p>这些对象管理资源进入条件，不执行模型梯度或 collective。运行时与批调度器之间要约定故障、重启和保存信号。</p>
 <h2 id="队列-公平与利用率">队列、公平与利用率<a class="anchor" href="#队列-公平与利用率" aria-label="链接到本节">#</a></h2>
-<h3 id="fifo">FIFO<a class="anchor" href="#fifo" aria-label="链接到本节">#</a></h3>
+<h3 id="先进先出-fifo">先进先出（FIFO）<a class="anchor" href="#先进先出-fifo" aria-label="链接到本节">#</a></h3>
 <p>按顺序容易让用户理解等待，但队首大作业可能暂时无法运行，后面较小的作业也被挡住。若采用绕过规则，应把它说明为策略，而非暗中改变顺序。</p>
-<h3 id="priority">Priority<a class="anchor" href="#priority" aria-label="链接到本节">#</a></h3>
+<h3 id="优先级-priority">优先级（Priority）<a class="anchor" href="#优先级-priority" aria-label="链接到本节">#</a></h3>
 <p>优先级可支持紧急校对任务，但需定义是否允许抢占、最长等待和普通任务的保障。否则高优任务持续到来时，低优队列可能长期没有进展。</p>
-<h3 id="drf">DRF<a class="anchor" href="#drf" aria-label="链接到本节">#</a></h3>
+<h3 id="drf-主导资源公平">DRF（主导资源公平）<a class="anchor" href="#drf-主导资源公平" aria-label="链接到本节">#</a></h3>
 <p>主导资源公平用于协调多资源份额，不能简单等同于平均 GPU 张数。不同卡型、显存和网络拓扑会使同一数量具有不同可用能力，资源分类仍需平台定义。</p>
-<h3 id="binpack">Binpack<a class="anchor" href="#binpack" aria-label="链接到本节">#</a></h3>
+<h3 id="装箱-binpack">装箱（Binpack）<a class="anchor" href="#装箱-binpack" aria-label="链接到本节">#</a></h3>
 <p>将兼容任务尽量集中，可以留下完整节点或互联域给大作业。集中也可能带来电力、温度或故障域风险，因此应把设备可用性与基础设施约束一起考虑。</p>
-<h2 id="backfill">Backfill<a class="anchor" href="#backfill" aria-label="链接到本节">#</a></h2>
+<h2 id="回填-backfill">回填（Backfill）<a class="anchor" href="#回填-backfill" aria-label="链接到本节">#</a></h2>
 <p>大作业等待资源窗口时，可以让能在窗口前退出的小作业暂时利用空闲容量。前提是时长估计可信，或任务具有可接受的抢占和恢复合同。</p>
 <p>训练时长受数据、保存和故障影响，用户填写“几分钟”并不是保证。可以使用明确最大运行时，超出时按约定退出，而非让临时任务无限拖延已承诺的大作业。</p>
 <h3 id="公平-碎片和等待为什么不能同时简单最大化">公平、碎片和等待为什么不能同时简单最大化<a class="anchor" href="#公平-碎片和等待为什么不能同时简单最大化" aria-label="链接到本节">#</a></h3>

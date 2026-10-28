@@ -10,7 +10,7 @@
 <p>服务将角色消息套入目标模型的聊天模板，再分词形成整数序列。模板版本也会改变 token 数，因此预估长度和最终入队长度可能不同。若 CPU 分词已经积压，增加 GPU 的调度预算并不能消除这段等待。</p>
 <h3 id="3-引擎调度器">3. 引擎调度器<a class="anchor" href="#3-引擎调度器" aria-label="链接到本节">#</a></h3>
 <p>一份输入只有同时满足本轮计算预算、序列上限和 KV 空间条件，才有机会被选中。vLLM 的 <code>EngineCore</code> 驱动引擎循环，<code>Scheduler</code> 决定工作分配，<code>KVCacheManager</code> 管理相关内存资源。它们操作的是请求状态，不负责给 Kubernetes 分配节点。</p>
-<h3 id="4-gpu-worker">4. GPU worker<a class="anchor" href="#4-gpu-worker" aria-label="链接到本节">#</a></h3>
+<h3 id="4-gpu-工作进程">4. GPU 工作进程<a class="anchor" href="#4-gpu-工作进程" aria-label="链接到本节">#</a></h3>
 <p>worker 根据调度结果执行模型。采用张量并行时，多张卡共同完成一个逻辑步骤；不能把它理解成每张卡独立回答一位读者。某个参与者尚未到达通信点，其他参与者即使计算完成也可能继续等待。</p>
 <h3 id="5-流式回传">5. 流式回传<a class="anchor" href="#5-流式回传" aria-label="链接到本节">#</a></h3>
 <p>采样后的 token 经文本解码形成增量，经应用协议返回浏览器。一个 token 可能只构成半个可显示片段，代理也可能合并若干增量发送。应分别记录设备生成时间和客户端收到时间，检查缓冲造成的间隙。</p>

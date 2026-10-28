@@ -6,7 +6,7 @@
 <h2 id="推理账本">推理账本<a class="anchor" href="#推理账本" aria-label="链接到本节">#</a></h2>
 <h3 id="权重">权重<a class="anchor" href="#权重" aria-label="链接到本节">#</a></h3>
 <p>参数个数乘存储位数再除以 8，得到权重内容的字节下界。30 亿参数按 16 位约占 5.59 GiB；压成 8 位约为 2.79 GiB，尚未加入量化尺度、对齐和保持高精度的部分。</p>
-<h3 id="kv-cache">KV Cache<a class="anchor" href="#kv-cache" aria-label="链接到本节">#</a></h3>
+<h3 id="kv-cache-键值缓存">KV Cache（键值缓存）<a class="anchor" href="#kv-cache-键值缓存" aria-label="链接到本节">#</a></h3>
 <p>每条仍在运行的序列都可能增加历史 key/value。并发数和每条序列的已缓存长度要一起统计。两种流量拥有相同请求数，也可能由于长度差异产生完全不同的缓存压力。</p>
 <h3 id="激活与-workspace">激活与 workspace<a class="anchor" href="#激活与-workspace" aria-label="链接到本节">#</a></h3>
 <p>模型执行会产生当前批次的中间结果，kernel 和通信还需要工作缓冲。这些空间未必长期驻留，却可能决定某一次 forward 能否成功。增加每轮 token 预算会改变这部分峰值。</p>

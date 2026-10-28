@@ -60,11 +60,11 @@
 
 先画 `parallel_state.py` 形成的组，再读 `tensor_parallel` 和 `pipeline_parallel` 的数据映射。模型配置可在 `transformer/transformer_config.py` 核对，分布式状态相关实现再进入 `distributed`。
 
-### NCCL
+### NCCL（集合通信库）
 
 先理解公共操作的输入输出合同，再跟随 enqueue、拓扑规划和 transport。只有需要分析具体设备执行时才深入 device 代码，否则容易丢掉“谁需要从谁得到什么”的原始问题。
 
-### Kubernetes GPU
+### Kubernetes 的 GPU 接入
 
 沿 `cmd/nvidia-device-plugin` 到 `internal/plugin` 与资源发现模块，区分发现、注册和 Allocate。另用 kubelet 与调度器职责补全节点选择过程，避免把插件误读为集群调度器。
 

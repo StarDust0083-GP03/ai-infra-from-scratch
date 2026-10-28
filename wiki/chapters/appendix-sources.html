@@ -84,9 +84,9 @@
 <p>以 <code>train.py</code> 或对应训练引擎定位更新边界，接着查数据组件、并行维度、模型 parallelize、优化器和 checkpointer。每个模块都标注在当前步骤的什么时候运行，哪些状态会跨步延续。</p>
 <h3 id="megatron-多维并行">Megatron 多维并行<a class="anchor" href="#megatron-多维并行" aria-label="链接到本节">#</a></h3>
 <p>先画 <code>parallel_state.py</code> 形成的组，再读 <code>tensor_parallel</code> 和 <code>pipeline_parallel</code> 的数据映射。模型配置可在 <code>transformer/transformer_config.py</code> 核对，分布式状态相关实现再进入 <code>distributed</code>。</p>
-<h3 id="nccl">NCCL<a class="anchor" href="#nccl" aria-label="链接到本节">#</a></h3>
+<h3 id="nccl-集合通信库">NCCL（集合通信库）<a class="anchor" href="#nccl-集合通信库" aria-label="链接到本节">#</a></h3>
 <p>先理解公共操作的输入输出合同，再跟随 enqueue、拓扑规划和 transport。只有需要分析具体设备执行时才深入 device 代码，否则容易丢掉“谁需要从谁得到什么”的原始问题。</p>
-<h3 id="kubernetes-gpu">Kubernetes GPU<a class="anchor" href="#kubernetes-gpu" aria-label="链接到本节">#</a></h3>
+<h3 id="kubernetes-的-gpu-接入">Kubernetes 的 GPU 接入<a class="anchor" href="#kubernetes-的-gpu-接入" aria-label="链接到本节">#</a></h3>
 <p>沿 <code>cmd/nvidia-device-plugin</code> 到 <code>internal/plugin</code> 与资源发现模块，区分发现、注册和 Allocate。另用 kubelet 与调度器职责补全节点选择过程，避免把插件误读为集群调度器。</p>
 <h2 id="原创性与限制">原创性与限制<a class="anchor" href="#原创性与限制" aria-label="链接到本节">#</a></h2>
 <p>本次保留章与节的结构，重新撰写说明、手算、教学代码和图形表达。真实 API、路径、论文标识和提交值作为事实引用保留，未修改归档第三方源码。</p>

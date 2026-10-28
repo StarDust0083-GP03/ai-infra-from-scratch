@@ -4,13 +4,13 @@
 <figcaption>图：双模型路由到不同就绪组，旧组独立排空；旁边是下载、预热、就绪的容量准备链。</figcaption></figure>
 
 <h2 id="数据面组件">数据面组件<a class="anchor" href="#数据面组件" aria-label="链接到本节">#</a></h2>
-<h3 id="gateway">Gateway<a class="anchor" href="#gateway" aria-label="链接到本节">#</a></h3>
+<h3 id="网关-gateway">网关（Gateway）<a class="anchor" href="#网关-gateway" aria-label="链接到本节">#</a></h3>
 <p>入口建立身份与额度边界，验证输入和输出上限，并选择模型。应尽早拒绝明显不支持的长度，避免让请求排了很久后才发现无法运行。拒绝结果也要有明确可重试语义。</p>
-<h3 id="replica">Replica<a class="anchor" href="#replica" aria-label="链接到本节">#</a></h3>
+<h3 id="副本-replica">副本（Replica）<a class="anchor" href="#副本-replica" aria-label="链接到本节">#</a></h3>
 <p>逻辑副本提供一份可服务能力，可能包含前端与一个设备工作组。副本数、Pod 数和 GPU 数没有固定一一对应，应在拓扑图中写出实际关系。</p>
-<h3 id="gpu-worker-group">GPU Worker Group<a class="anchor" href="#gpu-worker-group" aria-label="链接到本节">#</a></h3>
+<h3 id="gpu-执行组">GPU 执行组<a class="anchor" href="#gpu-执行组" aria-label="链接到本节">#</a></h3>
 <p>一个 TP 或 PP 副本可能依赖多个进程。就绪检查应确认必要参与者可以共同执行，而不是只检查前端端口。单个坏 rank 可能影响这组中的全部请求。</p>
-<h3 id="queue">Queue<a class="anchor" href="#queue" aria-label="链接到本节">#</a></h3>
+<h3 id="队列-queue">队列（Queue）<a class="anchor" href="#队列-queue" aria-label="链接到本节">#</a></h3>
 <p>有界队列可以吸收短突发，但等待本身要计入用户预算。长度、等待时限、租户份额和过载策略都应显式配置。无限排队会把容量不足延迟成大规模超时。</p>
 <h2 id="路由的三个层次">路由的三个层次<a class="anchor" href="#路由的三个层次" aria-label="链接到本节">#</a></h2>
 <p>先确定请求允许使用哪个模型或 adapter，再挑选就绪副本，最后由该副本的引擎选择本轮执行。模型权限、整体负载和 token 调度对应不同层，不宜塞进一个模糊的“智能路由”概念。</p>
