@@ -355,7 +355,7 @@ python3 examples/infra_lab.py memory --parameters 3 --weight-bits 8 --context 61
 <h2 id="07-continuous-batching--三个约束">三个约束<a class="anchor" href="#07-continuous-batching--三个约束" aria-label="链接到本节">#</a></h2>
 <h3 id="07-continuous-batching--token-预算">Token 预算<a class="anchor" href="#07-continuous-batching--token-预算" aria-label="链接到本节">#</a></h3>
 <p>本轮处理的位置总数有上限。已有生成序列通常各贡献一个新位置，一段输入块可能贡献许多位置。预算限制的是工作数量，并不保证各轮耗时相同。</p>
-<h3 id="07-continuous-batching--sequence-数量">Sequence 数量<a class="anchor" href="#07-continuous-batching--sequence-数量" aria-label="链接到本节">#</a></h3>
+<h3 id="07-continuous-batching--序列数量">序列数量<a class="anchor" href="#07-continuous-batching--序列数量" aria-label="链接到本节">#</a></h3>
 <p>同时维护的序列数影响 metadata、调度和状态容量。即使本轮 token 尚有预算，达到序列数上限后也可能不能接纳新请求。监控要分开显示两个计数。</p>
 <h3 id="07-continuous-batching--kv-块">KV 块<a class="anchor" href="#07-continuous-batching--kv-块" aria-label="链接到本节">#</a></h3>
 <p>执行新增位置前，需要有相应缓存空间。尾块可用槽位与是否需要领取新块也有区别。KV 受限时，增加 token 预算未必能带来任何进展。</p>
@@ -382,7 +382,7 @@ python3 examples/infra_lab.py check
 <h3 id="07-continuous-batching--读调度源码时追一条请求的资源变化">读调度源码时追一条请求的资源变化<a class="anchor" href="#07-continuous-batching--读调度源码时追一条请求的资源变化" aria-label="链接到本节">#</a></h3>
 <p>从等待请求开始，记下选中时已处理长度、本轮分配位置数与新增块数；执行结果返回后再检查长度是否前进，停止时检查资源如何退回。若选中却无进展，查执行或更新；若完成后占用不降，查释放及缓存引用。</p>
 <p>模拟器也应遵循这些不变量，但它没有设备输入布局、通信或真实 kernel，不能代替引擎性能实验。</p>
-<h2 id="07-continuous-batching--benchmark-应记录什么">Benchmark 应记录什么<a class="anchor" href="#07-continuous-batching--benchmark-应记录什么" aria-label="链接到本节">#</a></h2>
+<h2 id="07-continuous-batching--基准实验应记录什么">基准实验应记录什么<a class="anchor" href="#07-continuous-batching--基准实验应记录什么" aria-label="链接到本节">#</a></h2>
 <p>为每次实验固定模型与精度、模板、输入输出分布、到达方式、并发上限、每轮预算、块池和缓存策略。结果同时给出完成请求速率、有效输入输出 token 速率及延迟分位数。增加重试、拒绝和取消统计，防止靠丢弃困难请求获得漂亮平均数。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">08</div><h1>模型加载、精度与量化</h1></header><div class="prose"><p>档案问答的进程已经启动，却还不能接待读者。模型文件必须被识别、读取、转换并放到正确设备，执行路径还要完成预热。服务发布需要测量这一整段准备时间，不能只测容器启动。</p>
 <h2 id="08-loading-quantization--冷启动发生了什么">冷启动发生了什么<a class="anchor" href="#08-loading-quantization--冷启动发生了什么" aria-label="链接到本节">#</a></h2>
@@ -762,7 +762,7 @@ spec:
 <h3 id="16-serving-cluster--两个副本排队条数相同-剩余工作也可能不同">两个副本排队条数相同，剩余工作也可能不同<a class="anchor" href="#16-serving-cluster--两个副本排队条数相同-剩余工作也可能不同" aria-label="链接到本节">#</a></h3>
 <p>假设两个副本各等待三条请求，甲的输入合计 600 token，乙的合计 12,000 token。仅按请求数它们相同，实际输入工作显然不同；还需加上正在生成的历史状态与预期输出。</p>
 <p>缓存亲和可能节省输入计算，却也可能把同类请求集中到一处。应测“命中收益减去新增等待”的净效果，而不是追求最高命中率。</p>
-<h2 id="16-serving-cluster--autoscaling-看什么">Autoscaling 看什么<a class="anchor" href="#16-serving-cluster--autoscaling-看什么" aria-label="链接到本节">#</a></h2>
+<h2 id="16-serving-cluster--扩缩容看什么">扩缩容看什么<a class="anchor" href="#16-serving-cluster--扩缩容看什么" aria-label="链接到本节">#</a></h2>
 <p>可以把等待 token、首字分位数、活跃状态和完成能力作为主要信号，再结合设备与 CPU 指标解释原因。设备利用率低可能是需求少，也可能是输入或通信供给不畅。</p>
 <p>扩缩决策需迟滞和稳定窗口，避免短抖动反复创建与删除昂贵副本。就绪容量与正在准备容量应分列，否则 replicas 上升会被误认为用户已经获得帮助。</p>
 <h2 id="16-serving-cluster--冷启动决定提前量">冷启动决定提前量<a class="anchor" href="#16-serving-cluster--冷启动决定提前量" aria-label="链接到本节">#</a></h2>
@@ -822,7 +822,7 @@ spec:
 <h3 id="17-observability--成本分母也应该代表有用结果">成本分母也应该代表有用结果<a class="anchor" href="#17-observability--成本分母也应该代表有用结果" aria-label="链接到本节">#</a></h3>
 <p>如果同一段输入因抢占计算三次，总处理量变大，却没有三倍业务产出。将重算位置计入有效交付，会让低效系统显得更便宜。应把实际消耗与去重后的有用结果分列。</p>
 <p>为了首字目标保留热副本，可能提高低流量单位成本。比较两种容量策略时固定体验目标与流量，不让较慢策略靠违反 SLO 获得表面优势。</p>
-<h2 id="17-observability--cardinality-警告">Cardinality 警告<a class="anchor" href="#17-observability--cardinality-警告" aria-label="链接到本节">#</a></h2>
+<h2 id="17-observability--指标基数警告">指标基数警告<a class="anchor" href="#17-observability--指标基数警告" aria-label="链接到本节">#</a></h2>
 <p>请求 ID、任意用户标识、完整提示词和动态字符串不宜直接作为 metrics label。高基数可能拖垮监控并泄露资料。受控日志和 trace 保存细粒度关联，指标使用有界维度，并配合保留与访问策略。</p>
 <h2 id="17-observability--一张最小-dashboard">一张最小 Dashboard<a class="anchor" href="#17-observability--一张最小-dashboard" aria-label="链接到本节">#</a></h2>
 <p>第一行显示到达、完成、拒绝和用户延迟；第二行连接等待工作、活跃状态、有效 token 与缓存压力；第三行看设备供给、错误阶段和版本变化；最后显示准备中的容量及单位成功成本。</p>
@@ -896,7 +896,7 @@ spec:
 <h3 id="18-failure-recovery--控制器可以重新创建-pod-不能直接重放业务">控制器可以重新创建 Pod，不能直接重放业务<a class="anchor" href="#18-failure-recovery--控制器可以重新创建-pod-不能直接重放业务" aria-label="链接到本节">#</a></h3>
 <p>控制器让缺失副本重新存在，不代表之前的读者已收到完整答案，也不代表外部操作尚未发生。恢复组件后，还需要完成请求、计费和工具结果的业务收尾。</p>
 <p>设备恢复也不能以 Running 结束验收。至少确认代表性执行和必要通信正常，再逐步恢复流量，避免坏卡在重启循环中不断消耗新任务。</p>
-<h2 id="18-failure-recovery--runbook-最少包含">Runbook 最少包含<a class="anchor" href="#18-failure-recovery--runbook-最少包含" aria-label="链接到本节">#</a></h2>
+<h2 id="18-failure-recovery--恢复手册至少要写什么">恢复手册至少要写什么<a class="anchor" href="#18-failure-recovery--恢复手册至少要写什么" aria-label="链接到本节">#</a></h2>
 <p>写清可见症状、分类步骤、现场采集以及安全缓解动作。每个动作标出会中断什么、可能损失多少进度、怎样撤回和何时升级处理。</p>
 <p>例如“停止给一组路由并保留运行日志”与“重建整组并回退保存点”有不同影响，不应混成一句重启建议。演练后更新实际恢复时间与遗漏检查，让手册能被另一位值班人员执行。</p>
 </div></section><section class="book-section"><header class="chapter-head"><div class="chapter-number">19</div><h1>端到端：设计一个小型 AI 平台</h1></header><div class="prose"><p>将前面的机制合成一份档案馆平台草案。假设有 16 台服务器，每台 4 张同规格 GPU，白天提供问答，夜间进行校对训练。所有容量与目标都是教学设定，尚未在真实集群验收。</p>
